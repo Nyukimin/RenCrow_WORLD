@@ -1,0 +1,6 @@
+/Tmp/
+/bin/
+/build/
+*.exe
+*.test
+*.out

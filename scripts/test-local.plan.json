@@ -1,0 +1,59 @@
+{
+  "version": 2,
+  "steps": [
+    {
+      "name": "go-test",
+      "workingDirectory": ".",
+      "filePath": "go",
+      "arguments": ["test", "./..."],
+      "testFiles": [
+        "cmd/rencrow-world/main_test.go",
+        "internal/input/input_test.go",
+        "internal/world/bootstrap_isolation_test.go",
+        "internal/world/world_test.go"
+      ],
+      "tier": "fast",
+      "impact": {
+        "paths": [],
+        "packages": [],
+        "globalPaths": []
+      },
+      "resourceLocks": [],
+      "timeoutSeconds": 900,
+      "alwaysRun": true,
+      "platform": ["linux"]
+    },
+    {
+      "name": "go-vet",
+      "workingDirectory": ".",
+      "filePath": "go",
+      "arguments": ["vet", "./..."],
+      "tier": "fast",
+      "impact": {
+        "paths": [],
+        "packages": [],
+        "globalPaths": []
+      },
+      "resourceLocks": [],
+      "timeoutSeconds": 900,
+      "alwaysRun": true,
+      "platform": ["linux", "windows", "darwin"]
+    },
+    {
+      "name": "go-build",
+      "workingDirectory": ".",
+      "filePath": "go",
+      "arguments": ["build", "./..."],
+      "tier": "fast",
+      "impact": {
+        "paths": [],
+        "packages": [],
+        "globalPaths": []
+      },
+      "resourceLocks": [],
+      "timeoutSeconds": 900,
+      "alwaysRun": true,
+      "platform": ["linux", "windows", "darwin"]
+    }
+  ]
+}
