@@ -152,6 +152,40 @@ func TestDecodeRejectsInvalidWorkSets(t *testing.T) {
 	}
 }
 
+func TestParseStoredPayloads(t *testing.T) {
+	workRaw := []byte(`{
+		"contract_version":"rencrow.world.work-set/v2","world_id":"rencrow-home","actor_id":"mio",
+		"source_owner":"CORE","source_epoch":"core-epoch-1","source_revision":4,
+		"valid_until":"2026-10-21T00:00:00Z","active_work":[
+			{"task_id":"task-1","run_id":"run-1","execution_state":"running","work_class":"assigned_work","requires_house_presence":true,"classification_reason_code":"assigned"}
+		]}`)
+	work, err := ParseWorkSet(workRaw)
+	if err != nil {
+		t.Fatalf("ParseWorkSet: %v", err)
+	}
+	if work.ActorID != "mio" || len(work.ActiveWork) != 1 || !work.ActiveWork[0].RequiresHousePresence {
+		t.Fatalf("work set = %+v", work)
+	}
+
+	policyRaw := []byte(`{
+		"contract_version":"world.life-policy/v1","world_id":"rencrow-home","actor_id":"mio",
+		"source_owner":"CORE","source_epoch":"core-epoch-1","source_revision":2,
+		"valid_until":"2026-10-21T00:00:00Z","persona_revision":"persona-1",
+		"allowed_non_cognitive_activity_ids":["walk","rest"],
+		"expired_fallback_activity_ids":["rest"],"condition_profile_ref":"condition-1"}`)
+	policy, err := ParseLifePolicy(policyRaw)
+	if err != nil {
+		t.Fatalf("ParseLifePolicy: %v", err)
+	}
+	if policy.ActorID != "mio" || len(policy.ExpiredFallbackActivityIDs) != 1 {
+		t.Fatalf("life policy = %+v", policy)
+	}
+
+	if _, err := ParseWorkSet([]byte(`{"contract_version":"unknown"}`)); err == nil {
+		t.Fatal("invalid stored WorkSet accepted")
+	}
+}
+
 func TestDecodeLifePolicy(t *testing.T) {
 	raw := []byte(`{
 		"contract_version":"world.contracts/v1","record_type":"CoreProjectionEnvelope",

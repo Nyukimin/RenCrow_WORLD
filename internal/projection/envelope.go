@@ -52,6 +52,42 @@ type Envelope struct {
 	ValidUntil      time.Time
 	Payload         json.RawMessage
 	Digest          string
+	WorkSet         *WorkSet
+	LifePolicy      *LifePolicy
+}
+
+// WorkSet is the validated CORE-owned work assignment snapshot.
+type WorkSet struct {
+	WorldID        string
+	ActorID        string
+	SourceEpoch    string
+	SourceRevision uint64
+	ValidUntil     time.Time
+	ActiveWork     []WorkItem
+}
+
+// WorkItem is one assigned work item. RequiresHousePresence is already the
+// schema-required boolean value; a missing field is rejected at decode time.
+type WorkItem struct {
+	TaskID                   string
+	RunID                    string
+	ExecutionState           string
+	WorkClass                string
+	RequiresHousePresence    bool
+	ClassificationReasonCode string
+}
+
+// LifePolicy is the validated CORE-owned life permission snapshot.
+type LifePolicy struct {
+	WorldID                        string
+	ActorID                        string
+	SourceEpoch                    string
+	SourceRevision                 uint64
+	ValidUntil                     time.Time
+	PersonaRevision                string
+	ConditionProfileRef            string
+	AllowedNonCognitiveActivityIDs []string
+	ExpiredFallbackActivityIDs     []string
 }
 
 type wireEnvelope struct {
@@ -146,6 +182,30 @@ func Decode(raw []byte, worldID, timelineID, timelineEpoch string) (Envelope, er
 	return env, nil
 }
 
+// ParseWorkSet validates and decodes an already-received WorkSet payload.
+func ParseWorkSet(payload json.RawMessage) (WorkSet, error) {
+	if len(payload) == 0 || len(payload) > MaxEnvelopeBytes || !utf8.Valid(payload) {
+		return WorkSet{}, ErrInvalidEnvelope
+	}
+	e := Envelope{Payload: append(json.RawMessage(nil), payload...)}
+	if err := e.decodeWorkSet(); err != nil {
+		return WorkSet{}, invalid(err)
+	}
+	return *e.WorkSet, nil
+}
+
+// ParseLifePolicy validates and decodes an already-received LifePolicy payload.
+func ParseLifePolicy(payload json.RawMessage) (LifePolicy, error) {
+	if len(payload) == 0 || len(payload) > MaxEnvelopeBytes || !utf8.Valid(payload) {
+		return LifePolicy{}, ErrInvalidEnvelope
+	}
+	e := Envelope{Payload: append(json.RawMessage(nil), payload...)}
+	if err := e.decodeLifePolicy(); err != nil {
+		return LifePolicy{}, invalid(err)
+	}
+	return *e.LifePolicy, nil
+}
+
 func (e *Envelope) decodeWorkSet() error {
 	var p workSetPayload
 	if err := decodeStrict(e.Payload, &p); err != nil {
@@ -182,6 +242,18 @@ func (e *Envelope) decodeWorkSet() error {
 	e.SourceEpoch = p.SourceEpoch
 	e.SourceRevision = p.SourceRevision
 	e.ValidUntil, _ = parseUTC(p.ValidUntil)
+	e.WorkSet = &WorkSet{
+		WorldID: p.WorldID, ActorID: p.ActorID, SourceEpoch: p.SourceEpoch,
+		SourceRevision: p.SourceRevision, ValidUntil: e.ValidUntil,
+		ActiveWork: make([]WorkItem, 0, len(p.ActiveWork)),
+	}
+	for _, item := range p.ActiveWork {
+		e.WorkSet.ActiveWork = append(e.WorkSet.ActiveWork, WorkItem{
+			TaskID: item.TaskID, RunID: item.RunID, ExecutionState: item.ExecutionState,
+			WorkClass: item.WorkClass, RequiresHousePresence: *item.RequiresHousePresence,
+			ClassificationReasonCode: item.ClassificationReasonCode,
+		})
+	}
 	return nil
 }
 
@@ -222,6 +294,13 @@ func (e *Envelope) decodeLifePolicy() error {
 	e.SourceEpoch = p.SourceEpoch
 	e.SourceRevision = p.SourceRevision
 	e.ValidUntil, _ = parseUTC(p.ValidUntil)
+	e.LifePolicy = &LifePolicy{
+		WorldID: p.WorldID, ActorID: p.ActorID, SourceEpoch: p.SourceEpoch,
+		SourceRevision: p.SourceRevision, ValidUntil: e.ValidUntil,
+		PersonaRevision: p.PersonaRevision, ConditionProfileRef: p.ConditionProfileRef,
+		AllowedNonCognitiveActivityIDs: append([]string(nil), p.AllowedNonCognitiveActivityIDs...),
+		ExpiredFallbackActivityIDs:     append([]string(nil), p.ExpiredFallbackActivityIDs...),
+	}
 	return nil
 }
 
