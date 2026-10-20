@@ -6,6 +6,17 @@ cd "$(dirname "$0")/.."
 
 TMP="$(mktemp -d)"
 PID=""
+PYTHON="python3"
+if ! "$PYTHON" -c 'import sys' >/dev/null 2>&1; then
+  PYTHON="python"
+fi
+host_path() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
 cleanup() {
   if [ -n "$PID" ] && kill -0 "$PID" 2>/dev/null; then
     kill -TERM "$PID" 2>/dev/null || true
@@ -15,7 +26,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-PORT="$(python3 - <<'PY'
+PORT="$("$PYTHON" - <<'PY'
 import socket
 s = socket.socket()
 s.bind(("127.0.0.1", 0))
@@ -30,10 +41,12 @@ READ_HASH="$(printf '%s' "$READ_TOKEN" | sha256sum | cut -d' ' -f1)"
 BASE="http://127.0.0.1:${PORT}"
 SCOPE_PATH="/v1/worlds/rencrow-home/timelines/timeline-1"
 
-cat >"$TMP/config.json" <<EOF
+STORE_PATH="$(host_path "$TMP/world.db")"
+CONFIG_PATH="$(host_path "$TMP/config.json")"
+cat >"$CONFIG_PATH" <<EOF
 {
   "listen": "127.0.0.1:${PORT}",
-  "store_path": "${TMP}/world.db",
+  "store_path": "${STORE_PATH}",
   "scope": {"world_id": "rencrow-home", "timeline_id": "timeline-1", "timeline_epoch": "epoch-e2e"},
   "tokens": [
     {"id": "writer", "sha256": "${WRITE_HASH}", "scopes": ["read", "write", "stream"]},
@@ -47,10 +60,14 @@ cat >"$TMP/config.json" <<EOF
 EOF
 
 echo "== build =="
-go build -o "$TMP/rencrow-world" ./cmd/rencrow-world
+BIN="$TMP/rencrow-world"
+if [ "$(go env GOOS)" = "windows" ]; then
+  BIN="$BIN.exe"
+fi
+go build -o "$BIN" ./cmd/rencrow-world
 
 start_server() {
-  "$TMP/rencrow-world" serve --config "$TMP/config.json" >"$TMP/stdout.log" 2>"$TMP/stderr.log" &
+  "$BIN" serve --config "$CONFIG_PATH" >"$TMP/stdout.log" 2>"$TMP/stderr.log" &
   PID=$!
   for _ in $(seq 1 100); do
     code="$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health/live" || true)"
@@ -65,7 +82,7 @@ start_server() {
 }
 
 json_get() {
-  python3 -c 'import json,sys; v=json.load(sys.stdin); print(eval(sys.argv[1], {"v": v}))' "$1"
+  "$PYTHON" -c 'import json,sys; v=json.load(sys.stdin); print(eval(sys.argv[1], {"v": v}))' "$1"
 }
 
 echo "== readiness and auth =="
