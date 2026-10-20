@@ -291,13 +291,17 @@ func TestHealthAndReadiness(t *testing.T) {
 	ts, _ := newTestServer(t, nil)
 	if resp := doRequest(t, http.MethodGet, ts.URL+"/health/live", "", "", nil); resp.StatusCode != http.StatusOK {
 		t.Fatalf("live = %d", resp.StatusCode)
+	} else if body := decodeMap(t, resp); body["live"] != true || body["store_ready"] != false {
+		t.Fatalf("live body = %v", body)
 	}
 	if resp := doRequest(t, http.MethodGet, ts.URL+"/health/ready", "", "", nil); resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("ready without token = %d", resp.StatusCode)
 	}
 	resp := doRequest(t, http.MethodGet, ts.URL+"/health/ready", readerToken, "", nil)
 	body := decodeMap(t, resp)
-	if resp.StatusCode != http.StatusOK || body["status"] != "ready" || body["state_seq"].(float64) != 0 {
+	if resp.StatusCode != http.StatusOK || body["status"] != "ready" || body["state_seq"].(float64) != 0 ||
+		body["live"] != true || body["store_ready"] != true || body["logical_ready"] != true ||
+		body["reconciled"] != true || body["spatial_ready"] != false {
 		t.Fatalf("ready = %d %v", resp.StatusCode, body)
 	}
 	resp = doRequest(t, http.MethodGet, ts.URL+"/health/ready", wrongScopeToken, "", nil)
@@ -317,8 +321,10 @@ func TestReadinessWithoutTimeline(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
 	resp := doRequest(t, http.MethodGet, ts.URL+"/health/ready", readerToken, "", nil)
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("ready = %d", resp.StatusCode)
+	body := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusServiceUnavailable || body["code"] != "timeline_not_found" ||
+		body["store_ready"] != true || body["logical_ready"] != false {
+		t.Fatalf("ready = %d %v", resp.StatusCode, body)
 	}
 }
 
@@ -354,7 +360,8 @@ func TestReadinessRequiresCheckedReconcile(t *testing.T) {
 
 	resp := doRequest(t, http.MethodGet, ts.URL+"/health/ready", readerToken, "", nil)
 	body := decodeMap(t, resp)
-	if resp.StatusCode != http.StatusServiceUnavailable || body["code"] != "epoch_not_reconciled" {
+	if resp.StatusCode != http.StatusServiceUnavailable || body["code"] != "epoch_not_reconciled" ||
+		body["store_ready"] != true || body["logical_ready"] != false || body["spatial_ready"] != false {
 		t.Fatalf("unreconciled ready = %d %v", resp.StatusCode, body)
 	}
 
@@ -379,7 +386,8 @@ func TestReadinessRequiresCheckedReconcile(t *testing.T) {
 	}
 	resp = doRequest(t, http.MethodGet, ts.URL+"/health/ready", readerToken, "", nil)
 	body = decodeMap(t, resp)
-	if resp.StatusCode != http.StatusOK || body["status"] != "ready" || body["reconciled"] != true || body["spatial_ready"] != false {
+	if resp.StatusCode != http.StatusOK || body["status"] != "ready" || body["logical_ready"] != true ||
+		body["reconciled"] != true || body["spatial_ready"] != false {
 		t.Fatalf("reconciled ready = %d %v", resp.StatusCode, body)
 	}
 }

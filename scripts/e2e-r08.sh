@@ -191,7 +191,9 @@ put_projection() {
 
 echo "== readiness and no projection effect =="
 start_server
-[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $READ_TOKEN" "$BASE/health/ready")" = "200" ]
+READY_BODY="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE/health/ready")"
+[ "$(printf '%s' "$READY_BODY" | json_get 'v["logical_ready"]')" = "True" ]
+[ "$(printf '%s' "$READY_BODY" | json_get 'v["spatial_ready"]')" = "False" ]
 [ "$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/snapshot" | json_get 'v["state_seq"]')" = "0" ]
 
 echo "== source revision ordering and digest =="

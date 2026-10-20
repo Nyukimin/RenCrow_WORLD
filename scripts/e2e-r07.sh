@@ -89,7 +89,12 @@ echo "== readiness and auth =="
 start_server
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health/live")" = "200" ]
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$BASE/health/ready")" = "401" ]
-[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $READ_TOKEN" "$BASE/health/ready")" = "200" ]
+READY_BODY="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE/health/ready")"
+[ "$(printf '%s' "$READY_BODY" | json_get 'v["live"]')" = "True" ]
+[ "$(printf '%s' "$READY_BODY" | json_get 'v["store_ready"]')" = "True" ]
+[ "$(printf '%s' "$READY_BODY" | json_get 'v["logical_ready"]')" = "True" ]
+[ "$(printf '%s' "$READY_BODY" | json_get 'v["reconciled"]')" = "True" ]
+[ "$(printf '%s' "$READY_BODY" | json_get 'v["spatial_ready"]')" = "False" ]
 
 echo "== snapshot and command =="
 curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/snapshot" | grep -q '"state_seq":0'

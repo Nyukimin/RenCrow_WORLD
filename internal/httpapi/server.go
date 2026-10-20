@@ -183,7 +183,10 @@ func (s *Server) authenticate(r *http.Request) (principal, *apiError) {
 }
 
 func (s *Server) handleLive(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"schema_version": SchemaVersion, "status": "live"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"schema_version": SchemaVersion, "status": "live", "live": true,
+		"store_ready": false, "logical_ready": false, "reconciled": false, "spatial_ready": false,
+	})
 }
 
 func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
@@ -193,6 +196,11 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 			"schema_version": SchemaVersion,
 			"status":         "not_ready",
 			"code":           "timeline_not_found",
+			"live":           true,
+			"store_ready":    true,
+			"logical_ready":  false,
+			"reconciled":     false,
+			"spatial_ready":  false,
 		})
 		return
 	}
@@ -211,6 +219,11 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 			"status":         "not_ready",
 			"code":           "epoch_superseded",
 			"superseded_by":  supersededBy,
+			"live":           true,
+			"store_ready":    true,
+			"logical_ready":  false,
+			"reconciled":     false,
+			"spatial_ready":  false,
 		})
 		return
 	}
@@ -219,7 +232,11 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 			"schema_version": SchemaVersion,
 			"status":         "not_ready",
 			"code":           "epoch_not_reconciled",
+			"live":           true,
+			"store_ready":    true,
+			"logical_ready":  false,
 			"reconciled":     false,
+			"spatial_ready":  false,
 		})
 		return
 	}
@@ -231,6 +248,9 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 		"timeline_epoch": s.cfg.Scope.TimelineEpoch,
 		"state_seq":      seq,
 		"state_hash":     hash,
+		"live":           true,
+		"store_ready":    true,
+		"logical_ready":  true,
 		"reconciled":     true,
 		"spatial_ready":  false,
 	})
