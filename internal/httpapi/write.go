@@ -12,6 +12,7 @@ import (
 
 type commandRequest struct {
 	Action           string          `json:"action"`
+	TimelineEpoch    string          `json:"timeline_epoch"`
 	Payload          json.RawMessage `json:"payload"`
 	ExpectedStateSeq *uint64         `json:"expected_state_seq"`
 }
@@ -36,6 +37,14 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_action", "action is required and must be an exact opaque value")
 		return
 	}
+	if !validOpaque(req.TimelineEpoch, 256) {
+		writeAPIError(w, http.StatusBadRequest, "missing_timeline_epoch", "timeline_epoch is required and must be an exact opaque value")
+		return
+	}
+	if req.TimelineEpoch != s.cfg.Scope.TimelineEpoch {
+		writeAPIError(w, http.StatusConflict, "timeline_epoch_mismatch", "timeline_epoch does not match this server epoch")
+		return
+	}
 	key := r.Header.Get("Idempotency-Key")
 	if !validOpaque(key, 128) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_idempotency_key", "Idempotency-Key is required and must be an exact opaque value")
@@ -58,7 +67,7 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.store.Append(store.Command{
 		Scope:            s.cfg.Scope,
-		ClientID:         principal.id,
+		ClientID:         principal.publisherID,
 		IdempotencyKey:   key,
 		ExpectedStateSeq: req.ExpectedStateSeq,
 		Action:           req.Action,

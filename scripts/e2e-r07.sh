@@ -93,14 +93,14 @@ start_server
 
 echo "== snapshot and command =="
 curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/snapshot" | grep -q '"state_seq":0'
-CMD1='{"action":"debug.noop","payload":{"hello":"e2e"}}'
+CMD1='{"action":"debug.noop","timeline_epoch":"epoch-e2e","payload":{"hello":"e2e"}}'
 FIRST="$(curl -sS -X POST -H "Authorization: Bearer $WRITE_TOKEN" -H "Idempotency-Key: e2e-key-1" -H 'Content-Type: application/json' --data "$CMD1" "$BASE$SCOPE_PATH/commands")"
 [ "$(printf '%s' "$FIRST" | json_get 'v["receipt"]["status"]')" = "committed" ]
 RECEIPT="$(printf '%s' "$FIRST" | json_get 'v["receipt"]["receipt_id"]')"
 AGAIN="$(curl -sS -X POST -H "Authorization: Bearer $WRITE_TOKEN" -H "Idempotency-Key: e2e-key-1" -H 'Content-Type: application/json' --data "$CMD1" "$BASE$SCOPE_PATH/commands")"
 [ "$(printf '%s' "$AGAIN" | json_get 'v["duplicate"]')" = "True" ]
 [ "$(printf '%s' "$AGAIN" | json_get 'v["receipt"]["receipt_id"]')" = "$RECEIPT" ]
-CONFLICT_CODE="$(curl -s -o "$TMP/conflict.json" -w '%{http_code}' -X POST -H "Authorization: Bearer $WRITE_TOKEN" -H "Idempotency-Key: e2e-key-1" -H 'Content-Type: application/json' --data '{"action":"debug.noop","payload":{"hello":"other"}}' "$BASE$SCOPE_PATH/commands")"
+CONFLICT_CODE="$(curl -s -o "$TMP/conflict.json" -w '%{http_code}' -X POST -H "Authorization: Bearer $WRITE_TOKEN" -H "Idempotency-Key: e2e-key-1" -H 'Content-Type: application/json' --data '{"action":"debug.noop","timeline_epoch":"epoch-e2e","payload":{"hello":"other"}}' "$BASE$SCOPE_PATH/commands")"
 [ "$CONFLICT_CODE" = "409" ]
 grep -q '"code":"idempotency_conflict"' "$TMP/conflict.json"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H "Authorization: Bearer $READ_TOKEN" -H "Idempotency-Key: e2e-key-2" -H 'Content-Type: application/json' --data "$CMD1" "$BASE$SCOPE_PATH/commands")" = "403" ]

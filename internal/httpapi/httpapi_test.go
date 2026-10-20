@@ -22,11 +22,13 @@ import (
 )
 
 const (
-	writerToken     = "writer-token-value"
-	readerToken     = "reader-token-value"
-	streamerToken   = "streamer-token-value"
-	projectionToken = "projection-token-value"
-	wrongScopeToken = "wrong-scope-token-value"
+	writerToken              = "writer-token-value"
+	writer2Token             = "writer2-token-value"
+	readerToken              = "reader-token-value"
+	streamerToken            = "streamer-token-value"
+	projectionToken          = "projection-token-value"
+	projectionReconcileToken = "projection-reconcile-token-value"
+	wrongScopeToken          = "wrong-scope-token-value"
 )
 
 func tokenHash(s string) string {
@@ -46,10 +48,12 @@ func baseConfig(t *testing.T, dir string) Config {
 		StorePath: filepath.Join(dir, "world.db"),
 		Scope:     testScope(),
 		Tokens: []TokenConfig{
-			{ID: "writer", SHA256: tokenHash(writerToken), Scopes: []string{"read", "write", "stream"}},
+			{ID: "writer", PublisherID: "writer-publisher", SHA256: tokenHash(writerToken), Scopes: []string{"read", "write", "stream"}},
+			{ID: "writer2", PublisherID: "writer-publisher", SHA256: tokenHash(writer2Token), Scopes: []string{"read", "write"}},
 			{ID: "reader", SHA256: tokenHash(readerToken), Scopes: []string{"read"}},
 			{ID: "streamer", SHA256: tokenHash(streamerToken), Scopes: []string{"stream"}},
-			{ID: "core", SHA256: tokenHash(projectionToken), Scopes: []string{"projection"}},
+			{ID: "core", PublisherID: "core-publisher", SHA256: tokenHash(projectionToken), Scopes: []string{"projection"}},
+			{ID: "core-reconcile", PublisherID: "core-publisher", SHA256: tokenHash(projectionReconcileToken), Scopes: []string{"projection_reconcile"}},
 			{ID: "wrong", SHA256: tokenHash(wrongScopeToken), Scopes: []string{"read"}, Scope: &wrong},
 		},
 		CoreProjectionActors: []ProjectionActorConfig{
@@ -179,7 +183,9 @@ func decodeMap(t *testing.T, resp *http.Response) map[string]any {
 
 func commandBody(t *testing.T, action string, payload any) []byte {
 	t.Helper()
-	raw, err := json.Marshal(map[string]any{"action": action, "payload": payload})
+	raw, err := json.Marshal(map[string]any{
+		"action": action, "timeline_epoch": "epoch-1", "payload": payload,
+	})
 	if err != nil {
 		t.Fatalf("marshal command: %v", err)
 	}
@@ -316,6 +322,68 @@ func TestReadinessWithoutTimeline(t *testing.T) {
 	}
 }
 
+func TestReadinessRequiresCheckedReconcile(t *testing.T) {
+	dir := t.TempDir()
+	source, err := New(baseConfig(t, dir))
+	if err != nil {
+		t.Fatalf("source New: %v", err)
+	}
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+	if _, err := source.store.Backup(source.cfg.Scope, store.BackupOptions{
+		Path: backupPath, SourceRevision: "rev-health", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	if _, err := source.store.Restore(backupPath, store.RestoreOptions{
+		OldScope: source.cfg.Scope, NewEpoch: "epoch-2", CompletedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	_ = source.Close()
+
+	cfg := baseConfig(t, dir)
+	cfg.Scope.TimelineEpoch = "epoch-2"
+	cfg.InitialState = nil
+	target, err := New(cfg)
+	if err != nil {
+		t.Fatalf("target New: %v", err)
+	}
+	defer target.Close()
+	ts := httptest.NewServer(target.Handler())
+	defer ts.Close()
+
+	resp := doRequest(t, http.MethodGet, ts.URL+"/health/ready", readerToken, "", nil)
+	body := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusServiceUnavailable || body["code"] != "epoch_not_reconciled" {
+		t.Fatalf("unreconciled ready = %d %v", resp.StatusCode, body)
+	}
+
+	validUntil := time.Now().UTC().Add(time.Hour)
+	for _, kind := range []string{store.ProjectionKindWorkSet, store.ProjectionKindLifePolicy} {
+		if _, err := target.store.ApplyProjection(store.Projection{
+			Scope: cfg.Scope, ActorID: "mio", ActorInstanceID: "core-instance-mio",
+			Kind: kind, SourceEpoch: "core-epoch-1", SourceRevision: 1,
+			Payload:     json.RawMessage(`{"kind":"` + kind + `"}`),
+			PublisherID: "core-publisher", CredentialID: "core",
+			ValidUntil: validUntil, ReceivedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("projection %s: %v", kind, err)
+		}
+	}
+	if err := target.store.CompleteReconcileChecked(cfg.Scope, "core-revision-1",
+		[]store.ProjectionRequirement{
+			{ActorID: "mio", Kind: store.ProjectionKindWorkSet},
+			{ActorID: "mio", Kind: store.ProjectionKindLifePolicy},
+		}, time.Now().UTC()); err != nil {
+		t.Fatalf("checked reconcile: %v", err)
+	}
+	resp = doRequest(t, http.MethodGet, ts.URL+"/health/ready", readerToken, "", nil)
+	body = decodeMap(t, resp)
+	if resp.StatusCode != http.StatusOK || body["status"] != "ready" || body["reconciled"] != true || body["spatial_ready"] != false {
+		t.Fatalf("reconciled ready = %d %v", resp.StatusCode, body)
+	}
+}
+
 func TestSnapshotAuthScopeAndMethod(t *testing.T) {
 	ts, _ := newTestServer(t, nil)
 	resp := doRequest(t, http.MethodGet, snapshotURL(ts), readerToken, "", nil)
@@ -426,11 +494,57 @@ func TestCommandIdempotencyConflictAndAuth(t *testing.T) {
 	}
 }
 
+func TestCommandRequiresDestinationEpoch(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	noEpoch, _ := json.Marshal(map[string]any{
+		"action": "debug.noop", "payload": map[string]any{},
+	})
+	resp := doRequest(t, http.MethodPost, commandsURL(ts), writerToken, "epoch-missing", noEpoch)
+	if body := decodeMap(t, resp); resp.StatusCode != http.StatusBadRequest || body["error"].(map[string]any)["code"] != "missing_timeline_epoch" {
+		t.Fatalf("missing epoch = %d %v", resp.StatusCode, body)
+	}
+
+	wrongEpoch, _ := json.Marshal(map[string]any{
+		"action": "debug.noop", "timeline_epoch": "epoch-2", "payload": map[string]any{},
+	})
+	resp = doRequest(t, http.MethodPost, commandsURL(ts), writerToken, "epoch-wrong", wrongEpoch)
+	if body := decodeMap(t, resp); resp.StatusCode != http.StatusConflict || body["error"].(map[string]any)["code"] != "timeline_epoch_mismatch" {
+		t.Fatalf("wrong epoch = %d %v", resp.StatusCode, body)
+	}
+
+	resp = doRequest(t, http.MethodPost, commandsURL(ts), writerToken, "epoch-ok", commandBody(t, "debug.noop", map[string]any{}))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("exact epoch = %d %s", resp.StatusCode, readBody(t, resp))
+	}
+}
+
+func TestPublisherIdentitySurvivesCredentialRotation(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	body := commandBody(t, "move", map[string]any{"actor_id": "mio", "room_id": "1f-kitchen"})
+	resp := doRequest(t, http.MethodPost, commandsURL(ts), writerToken, "rotate-key", body)
+	first := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("first = %d %v", resp.StatusCode, first)
+	}
+	receiptID := first["receipt"].(map[string]any)["receipt_id"]
+
+	// The credential ID changed, but the logical Publisher ID is unchanged.
+	resp = doRequest(t, http.MethodPost, commandsURL(ts), writer2Token, "rotate-key", body)
+	again := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusOK || again["duplicate"] != true {
+		t.Fatalf("rotated credential = %d %v", resp.StatusCode, again)
+	}
+	if again["receipt"].(map[string]any)["receipt_id"] != receiptID {
+		t.Fatalf("receipt changed across credential rotation")
+	}
+}
+
 func TestCommandCASAndLimits(t *testing.T) {
 	ts, _ := newTestServer(t, nil)
 	zero := uint64(0)
 	body, _ := json.Marshal(map[string]any{
-		"action": "move", "payload": map[string]any{"actor_id": "mio", "room_id": "1f-kitchen"},
+		"action": "move", "timeline_epoch": "epoch-1",
+		"payload":            map[string]any{"actor_id": "mio", "room_id": "1f-kitchen"},
 		"expected_state_seq": zero,
 	})
 	resp := doRequest(t, http.MethodPost, commandsURL(ts), writerToken, "cas-1", body)
@@ -447,7 +561,7 @@ func TestCommandCASAndLimits(t *testing.T) {
 	}
 
 	large := bytes.Repeat([]byte("x"), 300*1024)
-	big, _ := json.Marshal(map[string]any{"action": "move", "payload": string(large)})
+	big, _ := json.Marshal(map[string]any{"action": "move", "timeline_epoch": "epoch-1", "payload": string(large)})
 	if resp := doRequest(t, http.MethodPost, commandsURL(ts), writerToken, "big", big); resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("big = %d", resp.StatusCode)
 	}

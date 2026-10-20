@@ -32,7 +32,15 @@ var (
 	ErrProjectionNotFound      = errors.New("projection not found")
 	ErrProjectionActorUnbound  = errors.New("projection actor is not bound")
 	ErrProjectionActorConflict = errors.New("projection actor mapping conflict")
+	ErrProjectionExpired       = errors.New("projection is expired")
 )
+
+// ProjectionRequirement is one Actor/kind head that must exist, be current, and
+// still be valid before a restored timeline epoch opens for Commands.
+type ProjectionRequirement struct {
+	ActorID string
+	Kind    string
+}
 
 // Projection is a validated CORE projection input. It is deliberately separate
 // from Command: no Command idempotency key, expected_state_seq, or Receipt is
@@ -45,7 +53,12 @@ type Projection struct {
 	SourceEpoch     string
 	SourceRevision  uint64
 	Payload         json.RawMessage
-	ReceivedAt      time.Time
+	// PublisherID is the durable logical caller identity; CredentialID is the
+	// rotating authentication credential that delivered this projection.
+	PublisherID  string
+	CredentialID string
+	ValidUntil   time.Time
+	ReceivedAt   time.Time
 }
 
 // ProjectionAck is the projection contract result. Status is one of the
@@ -61,6 +74,9 @@ type ProjectionAck struct {
 	SourceEpoch     string
 	SourceRevision  uint64
 	Digest          string
+	PublisherID     string
+	CredentialID    string
+	ValidUntil      time.Time
 	AcceptedAt      time.Time
 	RecordedAt      time.Time
 }
@@ -76,6 +92,7 @@ type ProjectionHead struct {
 	SourceRevision  uint64
 	Digest          string
 	Payload         json.RawMessage
+	ValidUntil      time.Time
 	AcceptedAt      time.Time
 }
 
@@ -85,6 +102,7 @@ type projectionHeadRow struct {
 	sourceRevision  uint64
 	digest          string
 	payload         []byte
+	validUntil      time.Time
 	acceptedAt      time.Time
 }
 
@@ -182,6 +200,7 @@ func (s *Store) applyProjection(p Projection, reconcile bool) (ProjectionAck, er
 	ack := ProjectionAck{
 		ActorID: p.ActorID, ActorInstanceID: p.ActorInstanceID, Kind: p.Kind,
 		SourceEpoch: p.SourceEpoch, SourceRevision: p.SourceRevision, Digest: digest,
+		PublisherID: p.PublisherID, CredentialID: p.CredentialID, ValidUntil: p.ValidUntil.UTC(),
 		RecordedAt: p.ReceivedAt.UTC(),
 	}
 	reject := func(status, reason string) (ProjectionAck, error) {
@@ -272,14 +291,97 @@ func (s *Store) ProjectionHead(scope Scope, actorID, kind string) (ProjectionHea
 	return ProjectionHead{
 		Scope: scope, ActorID: actorID, ActorInstanceID: head.actorInstanceID, Kind: kind,
 		SourceEpoch: head.sourceEpoch, SourceRevision: head.sourceRevision, Digest: head.digest,
-		Payload: append(json.RawMessage(nil), head.payload...), AcceptedAt: head.acceptedAt,
+		Payload: append(json.RawMessage(nil), head.payload...), ValidUntil: head.validUntil,
+		AcceptedAt: head.acceptedAt,
 	}, nil
+}
+
+// CompleteReconcileChecked opens a restored timeline epoch only when every
+// required Actor/kind head exists, is bound to the configured ActorInstance,
+// and is still valid at the check time. The legacy CompleteReconcile function
+// is retained for existing R06 callers, but external reconciliation must use
+// this checked form.
+func (s *Store) CompleteReconcileChecked(scope Scope, sourceRevision string, required []ProjectionRequirement, at time.Time) error {
+	if !scope.valid() || !validExact(sourceRevision, 256) || at.IsZero() || len(required) == 0 {
+		return ErrInvalidCommand
+	}
+	seen := map[string]bool{}
+	for _, req := range required {
+		key := req.ActorID + "\x00" + req.Kind
+		if !validExact(req.ActorID, 256) || !validProjectionKind(req.Kind) || seen[key] {
+			return ErrInvalidProjection
+		}
+		seen[key] = true
+	}
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, supersededBy, err := readEpochStatus(ctx, tx, scope)
+	if err != nil {
+		return err
+	}
+	if supersededBy != "" {
+		return ErrEpochSuperseded
+	}
+	for _, req := range required {
+		boundInstance, err := lookupProjectionBinding(ctx, tx, scope, req.ActorID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrProjectionActorUnbound
+		}
+		if err != nil {
+			return err
+		}
+		head, found, err := lookupProjectionHead(ctx, tx, scope, req.ActorID, req.Kind)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return ErrProjectionNotFound
+		}
+		if head.actorInstanceID != boundInstance {
+			return ErrProjectionActorConflict
+		}
+		if head.validUntil.IsZero() || !head.validUntil.After(at) {
+			return ErrProjectionExpired
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO epoch_reconcile_projection
+			(world_id, timeline_id, timeline_epoch, actor_id, projection_kind,
+			 source_epoch, source_revision, digest, valid_until, checked_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			ON CONFLICT(world_id, timeline_id, timeline_epoch, actor_id, projection_kind)
+			DO UPDATE SET source_epoch = excluded.source_epoch,
+				source_revision = excluded.source_revision, digest = excluded.digest,
+				valid_until = excluded.valid_until, checked_at = excluded.checked_at`,
+			scope.WorldID, scope.TimelineID, scope.TimelineEpoch, req.ActorID, req.Kind,
+			head.sourceEpoch, head.sourceRevision, head.digest,
+			head.validUntil.UTC().Format(time.RFC3339Nano), at.UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO epoch_reconcile
+		(world_id, timeline_id, timeline_epoch, source_revision, completed_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(world_id, timeline_id, timeline_epoch)
+		DO UPDATE SET source_revision = excluded.source_revision, completed_at = excluded.completed_at`,
+		scope.WorldID, scope.TimelineID, scope.TimelineEpoch, sourceRevision, at.UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE timeline SET reconciled = 1
+		WHERE world_id = ? AND timeline_id = ? AND timeline_epoch = ?`,
+		scope.WorldID, scope.TimelineID, scope.TimelineEpoch); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func validateProjection(p Projection) error {
 	if !p.Scope.valid() || !validExact(p.ActorID, 256) || !validExact(p.ActorInstanceID, 256) ||
 		!validProjectionKind(p.Kind) || !validExact(p.SourceEpoch, 256) ||
-		p.SourceRevision < 1 || p.SourceRevision > projectionpkg.MaxSourceRevision || p.ReceivedAt.IsZero() {
+		p.SourceRevision < 1 || p.SourceRevision > projectionpkg.MaxSourceRevision ||
+		!validExact(p.PublisherID, 256) || !validExact(p.CredentialID, 256) ||
+		p.ValidUntil.IsZero() || p.ReceivedAt.IsZero() {
 		return ErrInvalidProjection
 	}
 	if len(p.Payload) == 0 || !utf8.Valid(p.Payload) {
@@ -308,13 +410,13 @@ func lookupProjectionBinding(ctx context.Context, q queryer, scope Scope, actorI
 
 func lookupProjectionHead(ctx context.Context, q queryer, scope Scope, actorID, kind string) (projectionHeadRow, bool, error) {
 	var h projectionHeadRow
-	var accepted string
+	var accepted, validUntil string
 	var payload []byte
-	err := q.QueryRowContext(ctx, `SELECT actor_instance_id, source_epoch, source_revision, digest, payload, accepted_at
+	err := q.QueryRowContext(ctx, `SELECT actor_instance_id, source_epoch, source_revision, digest, payload, valid_until, accepted_at
 		FROM projection_head WHERE world_id = ? AND timeline_id = ? AND timeline_epoch = ?
 		AND actor_id = ? AND projection_kind = ?`,
 		scope.WorldID, scope.TimelineID, scope.TimelineEpoch, actorID, kind).
-		Scan(&h.actorInstanceID, &h.sourceEpoch, &h.sourceRevision, &h.digest, &payload, &accepted)
+		Scan(&h.actorInstanceID, &h.sourceEpoch, &h.sourceRevision, &h.digest, &payload, &validUntil, &accepted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return projectionHeadRow{}, false, nil
 	}
@@ -323,6 +425,7 @@ func lookupProjectionHead(ctx context.Context, q queryer, scope Scope, actorID, 
 	}
 	h.payload = append([]byte(nil), payload...)
 	h.acceptedAt, _ = time.Parse(time.RFC3339Nano, accepted)
+	h.validUntil, _ = time.Parse(time.RFC3339Nano, validUntil)
 	return h, true, nil
 }
 
@@ -344,14 +447,16 @@ func projectionEpochRetired(ctx context.Context, q queryer, scope Scope, actorID
 func upsertProjectionHead(ctx context.Context, tx *sql.Tx, p Projection, digest string) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO projection_head
 		(world_id, timeline_id, timeline_epoch, actor_id, actor_instance_id, projection_kind,
-		 source_epoch, source_revision, digest, payload, accepted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 source_epoch, source_revision, digest, payload, valid_until, accepted_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(world_id, timeline_id, timeline_epoch, actor_id, projection_kind)
 		DO UPDATE SET actor_instance_id = excluded.actor_instance_id,
 			source_epoch = excluded.source_epoch, source_revision = excluded.source_revision,
-			digest = excluded.digest, payload = excluded.payload, accepted_at = excluded.accepted_at`,
+			digest = excluded.digest, payload = excluded.payload,
+			valid_until = excluded.valid_until, accepted_at = excluded.accepted_at`,
 		p.Scope.WorldID, p.Scope.TimelineID, p.Scope.TimelineEpoch, p.ActorID, p.ActorInstanceID,
 		p.Kind, p.SourceEpoch, p.SourceRevision, digest, []byte(p.Payload),
+		p.ValidUntil.UTC().Format(time.RFC3339Nano),
 		p.ReceivedAt.UTC().Format(time.RFC3339Nano))
 	return err
 }
@@ -359,10 +464,11 @@ func upsertProjectionHead(ctx context.Context, tx *sql.Tx, p Projection, digest 
 func insertProjectionAck(ctx context.Context, tx *sql.Tx, p Projection, ack ProjectionAck) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO projection_ack
 		(ack_id, world_id, timeline_id, timeline_epoch, actor_id, actor_instance_id, projection_kind,
-		 source_epoch, source_revision, digest, status, reason, recorded_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 source_epoch, source_revision, digest, publisher_id, credential_id, valid_until, status, reason, recorded_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ack.ID, p.Scope.WorldID, p.Scope.TimelineID, p.Scope.TimelineEpoch, p.ActorID, p.ActorInstanceID,
-		p.Kind, p.SourceEpoch, p.SourceRevision, ack.Digest, ack.Status, ack.Reason,
+		p.Kind, p.SourceEpoch, p.SourceRevision, ack.Digest, p.PublisherID, p.CredentialID,
+		p.ValidUntil.UTC().Format(time.RFC3339Nano), ack.Status, ack.Reason,
 		p.ReceivedAt.UTC().Format(time.RFC3339Nano))
 	return err
 }

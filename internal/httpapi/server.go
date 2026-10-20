@@ -31,15 +31,18 @@ type Server struct {
 }
 
 type tokenEntry struct {
-	id     string
-	sha256 string
-	scopes map[string]bool
-	scope  *store.Scope
+	id          string
+	publisherID string
+	sha256      string
+	scopes      map[string]bool
+	scope       *store.Scope
 }
 
 type principal struct {
-	id     string
-	scopes map[string]bool
+	id           string
+	publisherID  string
+	credentialID string
+	scopes       map[string]bool
 }
 
 func (p principal) allows(scope string) bool {
@@ -66,7 +69,9 @@ func New(cfg Config) (*Server, error) {
 		for _, sc := range t.Scopes {
 			scopes[sc] = true
 		}
-		s.tokens = append(s.tokens, tokenEntry{id: t.ID, sha256: t.SHA256, scopes: scopes, scope: t.Scope})
+		s.tokens = append(s.tokens, tokenEntry{
+			id: t.ID, publisherID: t.PublisherID, sha256: t.SHA256, scopes: scopes, scope: t.Scope,
+		})
 	}
 	if cfg.InitialState != nil {
 		if _, _, _, err := st.Snapshot(cfg.Scope); errors.Is(err, store.ErrTimelineNotFound) {
@@ -112,7 +117,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/events", s.auth("read", s.handleEvents))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/receipts/{receipt}", s.auth("read", s.handleReceipt))
 	mux.HandleFunc("POST /v1/worlds/{world}/timelines/{timeline}/commands", s.auth("write", s.handleCommand))
-	mux.HandleFunc("PUT /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("projection", s.handleCoreProjection))
+	mux.HandleFunc("PUT /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("", s.handleCoreProjection))
+	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("", s.handleProjectionHead))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/stream", s.auth("stream", s.handleStream))
 	return mux
 }
@@ -169,7 +175,9 @@ func (s *Server) authenticate(r *http.Request) (principal, *apiError) {
 		if t.scope != nil && *t.scope != s.cfg.Scope {
 			return principal{}, &apiError{status: http.StatusForbidden, code: "scope_mismatch", message: "the credential is bound to another scope"}
 		}
-		return principal{id: t.id, scopes: t.scopes}, nil
+		return principal{
+			id: t.id, publisherID: t.publisherID, credentialID: t.id, scopes: t.scopes,
+		}, nil
 	}
 	return principal{}, &apiError{status: http.StatusUnauthorized, code: "unauthorized", message: "a bearer token is required"}
 }
@@ -192,6 +200,29 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 		writeAPIError(w, http.StatusServiceUnavailable, "store_unavailable", "the store is unavailable")
 		return
 	}
+	reconciled, supersededBy, err := s.store.EpochStatus(s.cfg.Scope)
+	if err != nil {
+		writeAPIError(w, http.StatusServiceUnavailable, "store_unavailable", "the store is unavailable")
+		return
+	}
+	if supersededBy != "" {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"schema_version": SchemaVersion,
+			"status":         "not_ready",
+			"code":           "epoch_superseded",
+			"superseded_by":  supersededBy,
+		})
+		return
+	}
+	if !reconciled {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"schema_version": SchemaVersion,
+			"status":         "not_ready",
+			"code":           "epoch_not_reconciled",
+			"reconciled":     false,
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"schema_version": SchemaVersion,
 		"status":         "ready",
@@ -200,6 +231,8 @@ func (s *Server) handleReady(w http.ResponseWriter, _ *http.Request) {
 		"timeline_epoch": s.cfg.Scope.TimelineEpoch,
 		"state_seq":      seq,
 		"state_hash":     hash,
+		"reconciled":     true,
+		"spatial_ready":  false,
 	})
 }
 

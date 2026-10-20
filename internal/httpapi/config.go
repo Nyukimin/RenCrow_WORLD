@@ -20,10 +20,11 @@ const (
 )
 
 var validScopes = map[string]bool{
-	"read":       true,
-	"write":      true,
-	"stream":     true,
-	"projection": true,
+	"read":                 true,
+	"write":                true,
+	"stream":               true,
+	"projection":           true,
+	"projection_reconcile": true,
 }
 
 // Config is the explicit R07 source configuration. There is no default route,
@@ -54,10 +55,15 @@ type ProjectionActorConfig struct {
 // TokenConfig stores only a SHA-256 digest of a bearer token. The raw token is
 // supplied by the operator out of band and is never written to this file.
 type TokenConfig struct {
-	ID     string       `json:"id"`
-	SHA256 string       `json:"sha256"`
-	Scopes []string     `json:"scopes"`
-	Scope  *store.Scope `json:"scope,omitempty"`
+	ID     string `json:"id"`
+	SHA256 string `json:"sha256"`
+	// PublisherID is the durable logical identity of the caller. It is
+	// independent of the rotating credential ID, so replacing a token does not
+	// change Command idempotency or projection audit identity. It defaults to
+	// the token ID when omitted.
+	PublisherID string       `json:"publisher_id,omitempty"`
+	Scopes      []string     `json:"scopes"`
+	Scope       *store.Scope `json:"scope,omitempty"`
 }
 
 type PageConfig struct {
@@ -148,6 +154,12 @@ func NormalizeConfig(cfg Config) (Config, error) {
 			return Config{}, fmt.Errorf("duplicate token id %q", t.ID)
 		}
 		seenIDs[t.ID] = true
+		if t.PublisherID == "" {
+			t.PublisherID = t.ID
+		}
+		if !validConfigExact(t.PublisherID, 256) {
+			return Config{}, fmt.Errorf("token %q has an invalid publisher_id", t.ID)
+		}
 		t.SHA256 = strings.ToLower(strings.TrimSpace(t.SHA256))
 		if len(t.SHA256) != 64 {
 			return Config{}, fmt.Errorf("token %q requires a 64-character sha256", t.ID)
@@ -175,7 +187,7 @@ func NormalizeConfig(cfg Config) (Config, error) {
 	needsProjectionBinding := false
 	for _, t := range cfg.Tokens {
 		for _, s := range t.Scopes {
-			if s == "projection" {
+			if s == "projection" || s == "projection_reconcile" {
 				needsProjectionBinding = true
 			}
 		}

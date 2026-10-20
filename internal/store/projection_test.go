@@ -22,6 +22,9 @@ func testProjection(scope Scope, actor, instance, kind, epoch string, revision u
 		SourceEpoch:     epoch,
 		SourceRevision:  revision,
 		Payload:         json.RawMessage(payload),
+		PublisherID:     "publisher-" + instance,
+		CredentialID:    "credential-" + instance,
+		ValidUntil:      projectionAt.Add(24 * time.Hour),
 		ReceivedAt:      projectionAt.Add(time.Duration(revision) * time.Second),
 	}
 }
@@ -191,6 +194,9 @@ func TestProjectionRejectsInvalidInputAndLimits(t *testing.T) {
 		func() Projection { p := base; p.ActorID = ""; return p }(),
 		func() Projection { p := base; p.Payload = json.RawMessage(`[]`); return p }(),
 		func() Projection { p := base; p.Payload = json.RawMessage(`{"x":`); return p }(),
+		func() Projection { p := base; p.PublisherID = ""; return p }(),
+		func() Projection { p := base; p.CredentialID = ""; return p }(),
+		func() Projection { p := base; p.ValidUntil = time.Time{}; return p }(),
 	}
 	for i, p := range cases {
 		if _, err := s.ApplyProjection(p); !errors.Is(err, ErrInvalidProjection) {

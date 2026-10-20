@@ -326,6 +326,9 @@ func (s *Store) Restore(backupPath string, opts RestoreOptions) (RestoreRecord, 
 
 // CompleteReconcile opens the new epoch for new Commands after CORE full
 // reconcile. It is idempotent for the same epoch.
+// CompleteReconcile is the legacy R06 gate. It does not inspect projection
+// heads and must not be exposed as the external restore-open operation. Use
+// CompleteReconcileChecked when a restored epoch depends on CORE projections.
 func (s *Store) CompleteReconcile(scope Scope, sourceRevision string, at time.Time) error {
 	if !scope.valid() || !validExact(sourceRevision, 256) || at.IsZero() {
 		return ErrInvalidCommand

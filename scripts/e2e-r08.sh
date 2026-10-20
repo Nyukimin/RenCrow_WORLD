@@ -39,9 +39,11 @@ PY
 WRITE_TOKEN="e2e-r08-write-token"
 READ_TOKEN="e2e-r08-read-token"
 CORE_TOKEN="e2e-r08-core-token"
+CORE_RECONCILE_TOKEN="e2e-r08-core-reconcile-token"
 WRITE_HASH="$(printf '%s' "$WRITE_TOKEN" | sha256sum | cut -d' ' -f1)"
 READ_HASH="$(printf '%s' "$READ_TOKEN" | sha256sum | cut -d' ' -f1)"
 CORE_HASH="$(printf '%s' "$CORE_TOKEN" | sha256sum | cut -d' ' -f1)"
+CORE_RECONCILE_HASH="$(printf '%s' "$CORE_RECONCILE_TOKEN" | sha256sum | cut -d' ' -f1)"
 BASE="http://127.0.0.1:${PORT}"
 SCOPE_PATH="/v1/worlds/rencrow-home/timelines/timeline-1"
 PROJECTION_PATH="$SCOPE_PATH/core-projections"
@@ -56,7 +58,8 @@ cat >"$CONFIG_PATH" <<EOF
   "tokens": [
     {"id": "writer", "sha256": "${WRITE_HASH}", "scopes": ["read", "write", "stream"]},
     {"id": "reader", "sha256": "${READ_HASH}", "scopes": ["read"]},
-    {"id": "core", "sha256": "${CORE_HASH}", "scopes": ["projection"]}
+    {"id": "core", "publisher_id": "core-publisher", "sha256": "${CORE_HASH}", "scopes": ["projection"]},
+    {"id": "core-reconcile", "publisher_id": "core-publisher", "sha256": "${CORE_RECONCILE_HASH}", "scopes": ["projection_reconcile"]}
   ],
   "core_projection_actors": [{"actor_id": "mio", "actor_instance_id": "core-instance-mio"}],
   "page": {"max_events": 500, "max_bytes": 2097152},
@@ -179,9 +182,9 @@ PY
 }
 
 put_projection() {
-  local path="$1" body="$2" out="$3" suffix="${4:-}"
+  local path="$1" body="$2" out="$3" suffix="${4:-}" token="${5:-$CORE_TOKEN}"
   curl -sS -o "$out" -w '%{http_code}' -X PUT \
-    -H "Authorization: Bearer $CORE_TOKEN" \
+    -H "Authorization: Bearer $token" \
     -H 'Content-Type: application/json' \
     --data-binary @"$body" "$BASE$path$suffix"
 }
@@ -212,6 +215,13 @@ make_life_policy "$LP1" core-epoch-1 1
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS10" "$TMP/ack.json")"
 [ "$CODE" = "200" ]
 [ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "accepted" ]
+[ "$(json_get 'v["projection"]["publisher_id"]' <"$TMP/ack.json")" = "core-publisher" ]
+[ "$(json_get 'v["projection"]["credential_id"]' <"$TMP/ack.json")" = "core" ]
+
+CODE="$(curl -sS -o "$TMP/head.json" -w '%{http_code}' -H "Authorization: Bearer $CORE_TOKEN" "$BASE$PROJECTION_PATH/mio/full_actor_work_set")"
+[ "$CODE" = "200" ]
+[ "$(json_get 'v["projection"]["source_revision"]' <"$TMP/head.json")" = "10" ]
+[ "$(json_get 'v["projection"]["digest"]' <"$TMP/head.json")" != "" ]
 
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS9" "$TMP/ack.json")"
 [ "$CODE" = "409" ]
@@ -243,7 +253,7 @@ CODE="$(put_projection "$PROJECTION_PATH/kuro/full_actor_work_set" "$WS_KURO" "$
 grep -q '"code":"actor_not_bound"' "$TMP/ack.json"
 CODE="$(curl -s -o "$TMP/ack.json" -w '%{http_code}' -X PUT -H "Authorization: Bearer $WRITE_TOKEN" -H 'Content-Type: application/json' --data-binary @"$WS_QUEUED" "$BASE$PROJECTION_PATH/mio/full_actor_work_set")"
 [ "$CODE" = "403" ]
-[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $READ_TOKEN" "$BASE$PROJECTION_PATH/mio/full_actor_work_set")" = "405" ]
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $READ_TOKEN" "$BASE$PROJECTION_PATH/mio/full_actor_work_set")" = "403" ]
 
 echo "== projections do not create Commands or Events =="
 [ "$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/snapshot" | json_get 'v["state_seq"]')" = "0" ]
@@ -269,6 +279,10 @@ CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS_E2" "$TMP
 [ "$CODE" = "409" ]
 [ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "epoch_requires_reconcile" ]
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS_E2" "$TMP/ack.json" '?reconcile=true')"
+[ "$CODE" = "403" ]
+CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS_E2" "$TMP/ack.json" '' "$CORE_RECONCILE_TOKEN")"
+[ "$CODE" = "403" ]
+CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS_E2" "$TMP/ack.json" '?reconcile=true' "$CORE_RECONCILE_TOKEN")"
 [ "$CODE" = "200" ]
 [ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "accepted" ]
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS_E1_LATE" "$TMP/ack.json")"
@@ -276,7 +290,7 @@ CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS_E1_LATE" 
 [ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "epoch_superseded" ]
 
 echo "== token secrecy =="
-if grep -qE 'e2e-r08-(write|read|core)-token' "$TMP/stdout.log" "$TMP/stderr.log"; then
+if grep -qE 'e2e-r08-(write|read|core|core-reconcile)-token' "$TMP/stdout.log" "$TMP/stderr.log"; then
   echo "token leaked to logs" >&2
   exit 1
 fi

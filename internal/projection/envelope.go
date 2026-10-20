@@ -206,6 +206,17 @@ func (e *Envelope) decodeLifePolicy() error {
 	if err := validateActivityIDs(p.ExpiredFallbackActivityIDs, 16); err != nil {
 		return err
 	}
+	// Expiry narrows the existing permission; it never grants an activity that
+	// was not already allowed as non-cognitive.
+	allowed := make(map[string]bool, len(p.AllowedNonCognitiveActivityIDs))
+	for _, id := range p.AllowedNonCognitiveActivityIDs {
+		allowed[id] = true
+	}
+	for _, id := range p.ExpiredFallbackActivityIDs {
+		if !allowed[id] {
+			return errors.New("expired fallback activity is not allowed")
+		}
+	}
 	e.WorldID = p.WorldID
 	e.ActorID = p.ActorID
 	e.SourceEpoch = p.SourceEpoch

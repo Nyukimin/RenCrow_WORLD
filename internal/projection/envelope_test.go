@@ -161,7 +161,7 @@ func TestDecodeLifePolicy(t *testing.T) {
 			"contract_version":"world.life-policy/v1","world_id":"rencrow-home","actor_id":"mio",
 			"source_owner":"CORE","source_epoch":"core-epoch-1","source_revision":3,
 			"valid_until":"2026-10-21T00:00:00Z","persona_revision":"persona-7",
-			"allowed_non_cognitive_activity_ids":["walk","read"],
+			"allowed_non_cognitive_activity_ids":["walk","read","idle","rest"],
 			"expired_fallback_activity_ids":["idle","rest"],
 			"condition_profile_ref":"condition-1"
 		}
@@ -174,9 +174,14 @@ func TestDecodeLifePolicy(t *testing.T) {
 		t.Fatalf("envelope = %+v", env)
 	}
 
-	duplicate := []byte(strings.Replace(string(raw), `["walk","read"]`, `["walk","walk"]`, 1))
+	duplicate := []byte(strings.Replace(string(raw), `["walk","read","idle","rest"]`, `["walk","walk"]`, 1))
 	if _, err := Decode(duplicate, "rencrow-home", "timeline-1", "timeline-epoch-1"); err == nil {
 		t.Fatal("duplicate activity id accepted")
+	}
+
+	outside := []byte(strings.Replace(string(raw), `["idle","rest"]`, `["idle","outside"]`, 1))
+	if _, err := Decode(outside, "rencrow-home", "timeline-1", "timeline-epoch-1"); err == nil {
+		t.Fatal("fallback outside allowed activities accepted")
 	}
 }
 

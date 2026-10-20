@@ -84,6 +84,17 @@ func TestCoreProjectionOrderingOverHTTP(t *testing.T) {
 	resp := doRequest(t, http.MethodPut, url, projectionToken, "", body10)
 	if ack := projectionAck(t, resp); resp.StatusCode != http.StatusOK || ack["status"] != store.ProjectionAccepted {
 		t.Fatalf("rev10 = %d %v", resp.StatusCode, ack)
+	} else if ack["publisher_id"] != "core-publisher" || ack["credential_id"] != "core" {
+		t.Fatalf("ack identity = %v", ack)
+	}
+	resp = doRequest(t, http.MethodGet, url, projectionToken, "", nil)
+	head := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("head = %d %v", resp.StatusCode, head)
+	}
+	hp := head["projection"].(map[string]any)
+	if hp["source_revision"].(float64) != 10 || hp["digest"] == "" || hp["valid_until"] == nil {
+		t.Fatalf("head body = %v", hp)
 	}
 
 	// Projection ordering is independent from Command idempotency: retries use
@@ -132,8 +143,14 @@ func TestCoreProjectionReconcileAndBinding(t *testing.T) {
 	if ack := projectionAck(t, resp); resp.StatusCode != http.StatusConflict || ack["status"] != store.ProjectionEpochRequiresReconcile {
 		t.Fatalf("unapproved epoch = %d %v", resp.StatusCode, ack)
 	}
+	if resp := doRequest(t, http.MethodPut, url+"?reconcile=true", projectionToken, "", next); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("normal projection reconciled = %d", resp.StatusCode)
+	}
+	if resp := doRequest(t, http.MethodPut, url, projectionReconcileToken, "", next); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("reconcile token normal projection = %d", resp.StatusCode)
+	}
 
-	resp = doRequest(t, http.MethodPut, url+"?reconcile=true", projectionToken, "", next)
+	resp = doRequest(t, http.MethodPut, url+"?reconcile=true", projectionReconcileToken, "", next)
 	if ack := projectionAck(t, resp); resp.StatusCode != http.StatusOK || ack["status"] != store.ProjectionAccepted {
 		t.Fatalf("reconcile = %d %v", resp.StatusCode, ack)
 	}
@@ -173,8 +190,8 @@ func TestCoreProjectionRejectsBadRequestsAndScopes(t *testing.T) {
 	if resp := doRequest(t, http.MethodPost, commandsURL(ts), projectionToken, "k", commandBody(t, "debug.noop", map[string]any{})); resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("projection token command = %d", resp.StatusCode)
 	}
-	if resp := doRequest(t, http.MethodGet, url, readerToken, "", nil); resp.StatusCode != http.StatusMethodNotAllowed {
-		t.Fatalf("get projection = %d", resp.StatusCode)
+	if resp := doRequest(t, http.MethodGet, url, readerToken, "", nil); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("get projection with read token = %d", resp.StatusCode)
 	}
 
 	badKind := projectionEnvelope(t, projection.KindWorkSet, "mio", "core-instance-mio", "core-epoch-1", 1, workSetPayload("core-epoch-1", 1, []any{}))

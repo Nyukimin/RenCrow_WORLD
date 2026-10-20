@@ -263,7 +263,7 @@ func (s *Store) migrate() error {
 			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
 			actor_id TEXT NOT NULL, actor_instance_id TEXT NOT NULL, projection_kind TEXT NOT NULL,
 			source_epoch TEXT NOT NULL, source_revision INTEGER NOT NULL, digest TEXT NOT NULL,
-			payload BLOB NOT NULL, accepted_at TEXT NOT NULL,
+			payload BLOB NOT NULL, valid_until TEXT NOT NULL DEFAULT '', accepted_at TEXT NOT NULL,
 			PRIMARY KEY (world_id, timeline_id, timeline_epoch, actor_id, projection_kind))`,
 		`CREATE TABLE IF NOT EXISTS projection_epoch_history (
 			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
@@ -280,7 +280,15 @@ func (s *Store) migrate() error {
 			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
 			actor_id TEXT NOT NULL, actor_instance_id TEXT NOT NULL, projection_kind TEXT NOT NULL,
 			source_epoch TEXT NOT NULL, source_revision INTEGER NOT NULL, digest TEXT NOT NULL,
+			publisher_id TEXT NOT NULL DEFAULT '', credential_id TEXT NOT NULL DEFAULT '',
+			valid_until TEXT NOT NULL DEFAULT '',
 			status TEXT NOT NULL, reason TEXT NOT NULL, recorded_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS epoch_reconcile_projection (
+			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
+			actor_id TEXT NOT NULL, projection_kind TEXT NOT NULL,
+			source_epoch TEXT NOT NULL, source_revision INTEGER NOT NULL, digest TEXT NOT NULL,
+			valid_until TEXT NOT NULL, checked_at TEXT NOT NULL,
+			PRIMARY KEY (world_id, timeline_id, timeline_epoch, actor_id, projection_kind))`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
@@ -288,11 +296,15 @@ func (s *Store) migrate() error {
 		}
 	}
 	// R06 databases created before backup/restore need the epoch gate columns.
-	for _, col := range []struct{ name, ddl string }{
-		{"reconciled", "INTEGER NOT NULL DEFAULT 1"},
-		{"superseded_by", "TEXT NOT NULL DEFAULT ''"},
+	for _, col := range []struct{ table, name, ddl string }{
+		{"timeline", "reconciled", "INTEGER NOT NULL DEFAULT 1"},
+		{"timeline", "superseded_by", "TEXT NOT NULL DEFAULT ''"},
+		{"projection_head", "valid_until", "TEXT NOT NULL DEFAULT ''"},
+		{"projection_ack", "publisher_id", "TEXT NOT NULL DEFAULT ''"},
+		{"projection_ack", "credential_id", "TEXT NOT NULL DEFAULT ''"},
+		{"projection_ack", "valid_until", "TEXT NOT NULL DEFAULT ''"},
 	} {
-		if err := s.ensureColumn("timeline", col.name, col.ddl); err != nil {
+		if err := s.ensureColumn(col.table, col.name, col.ddl); err != nil {
 			return err
 		}
 	}
