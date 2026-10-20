@@ -291,6 +291,16 @@ CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS_E1_LATE" 
 [ "$CODE" = "409" ]
 [ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "epoch_superseded" ]
 
+echo "== checked reconcile route =="
+RECONCILE_URL="$BASE$PROJECTION_PATH/reconcile"
+RECONCILE_BODY='{"schema_version":1,"timeline_epoch":"epoch-e2e","source_revision":"e2e-reconcile"}'
+CODE="$(curl -s -o "$TMP/reconcile.json" -w '%{http_code}' -X POST -H "Authorization: Bearer $CORE_TOKEN" -H 'Content-Type: application/json' --data "$RECONCILE_BODY" "$RECONCILE_URL")"
+[ "$CODE" = "403" ]
+CODE="$(curl -s -o "$TMP/reconcile.json" -w '%{http_code}' -X POST -H "Authorization: Bearer $CORE_RECONCILE_TOKEN" -H 'Content-Type: application/json' --data "$RECONCILE_BODY" "$RECONCILE_URL")"
+[ "$CODE" = "200" ]
+[ "$(json_get 'v["status"]' <"$TMP/reconcile.json")" = "reconciled" ]
+[ "$(json_get 'v["required_projections"]' <"$TMP/reconcile.json")" = "2" ]
+
 echo "== token secrecy =="
 if grep -qE 'e2e-r08-(write|read|core|core-reconcile)-token' "$TMP/stdout.log" "$TMP/stderr.log"; then
   echo "token leaked to logs" >&2

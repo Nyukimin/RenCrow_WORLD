@@ -237,3 +237,103 @@ func reconcileQuery(r *http.Request) (bool, bool) {
 		return false, false
 	}
 }
+
+type reconcileRequest struct {
+	SchemaVersion  int    `json:"schema_version"`
+	TimelineEpoch  string `json:"timeline_epoch"`
+	SourceRevision string `json:"source_revision"`
+}
+
+type reconcileResponse struct {
+	SchemaVersion       int       `json:"schema_version"`
+	Status              string    `json:"status"`
+	TimelineEpoch       string    `json:"timeline_epoch"`
+	SourceRevision      string    `json:"source_revision"`
+	RequiredProjections int       `json:"required_projections"`
+	ReconciledAt        time.Time `json:"reconciled_at"`
+}
+
+// handleProjectionReconcile is the WORLD-owned restore-open decision. The
+// caller supplies the CORE source revision and intended timeline epoch, but
+// cannot choose a smaller Actor/kind set: WORLD derives it from operator
+// configuration and rechecks every head in one transaction.
+func (s *Server) handleProjectionReconcile(w http.ResponseWriter, r *http.Request) {
+	if contentType := r.Header.Get("Content-Type"); contentType != "" && !strings.HasPrefix(contentType, "application/json") {
+		writeAPIError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "reconcile requires application/json")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxProjectionBody)
+	var req reconcileRequest
+	if err := decodeSingleJSON(r, &req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeAPIError(w, http.StatusRequestEntityTooLarge, "reconcile_too_large", "the reconcile body exceeds the limit")
+			return
+		}
+		writeAPIError(w, http.StatusBadRequest, "invalid_json", "the reconcile body is not one valid JSON object")
+		return
+	}
+	if req.SchemaVersion != SchemaVersion {
+		writeAPIError(w, http.StatusBadRequest, "unsupported_schema_version", "schema_version must be 1")
+		return
+	}
+	if !validOpaque(req.TimelineEpoch, 256) {
+		writeAPIError(w, http.StatusBadRequest, "missing_timeline_epoch", "timeline_epoch is required and must be an exact opaque value")
+		return
+	}
+	if req.TimelineEpoch != s.cfg.Scope.TimelineEpoch {
+		writeAPIError(w, http.StatusConflict, "timeline_epoch_mismatch", "timeline_epoch does not match this server epoch")
+		return
+	}
+	if !validOpaque(req.SourceRevision, 256) {
+		writeAPIError(w, http.StatusBadRequest, "invalid_source_revision", "source_revision is required and must be an exact opaque value")
+		return
+	}
+	required := s.requiredProjectionSet()
+	if len(required) == 0 {
+		writeAPIError(w, http.StatusConflict, "no_required_projections", "the server has no configured projection requirements")
+		return
+	}
+	at := nowUTC()
+	err := s.store.CompleteReconcileChecked(s.cfg.Scope, req.SourceRevision, required, at)
+	switch {
+	case err == nil:
+	case errors.Is(err, store.ErrProjectionNotFound):
+		writeAPIError(w, http.StatusConflict, "projection_not_found", "a required projection head is missing")
+		return
+	case errors.Is(err, store.ErrProjectionExpired):
+		writeAPIError(w, http.StatusConflict, "projection_expired", "a required projection head is expired")
+		return
+	case errors.Is(err, store.ErrProjectionActorUnbound):
+		writeAPIError(w, http.StatusConflict, "projection_actor_unbound", "a required Actor has no binding")
+		return
+	case errors.Is(err, store.ErrProjectionActorConflict):
+		writeAPIError(w, http.StatusConflict, "projection_actor_conflict", "a required projection belongs to another ActorInstance")
+		return
+	case errors.Is(err, store.ErrEpochSuperseded):
+		writeAPIError(w, http.StatusConflict, "epoch_superseded", "the timeline epoch has been superseded")
+		return
+	case errors.Is(err, store.ErrInvalidCommand), errors.Is(err, store.ErrInvalidProjection):
+		writeAPIError(w, http.StatusBadRequest, "invalid_reconcile", "the reconcile request is invalid")
+		return
+	default:
+		writeAPIError(w, http.StatusInternalServerError, "internal_error", "the timeline could not be reconciled")
+		return
+	}
+	writeJSON(w, http.StatusOK, reconcileResponse{
+		SchemaVersion: SchemaVersion, Status: "reconciled",
+		TimelineEpoch: s.cfg.Scope.TimelineEpoch, SourceRevision: req.SourceRevision,
+		RequiredProjections: len(required), ReconciledAt: at,
+	})
+}
+
+func (s *Server) requiredProjectionSet() []store.ProjectionRequirement {
+	required := make([]store.ProjectionRequirement, 0, len(s.cfg.CoreProjectionActors)*2)
+	for _, actor := range s.cfg.CoreProjectionActors {
+		required = append(required,
+			store.ProjectionRequirement{ActorID: actor.ActorID, Kind: projection.KindWorkSet},
+			store.ProjectionRequirement{ActorID: actor.ActorID, Kind: projection.KindLifePolicy},
+		)
+	}
+	return required
+}

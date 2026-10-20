@@ -119,6 +119,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/worlds/{world}/timelines/{timeline}/commands", s.auth("write", s.handleCommand))
 	mux.HandleFunc("PUT /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("", s.handleCoreProjection))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("", s.handleProjectionHead))
+	mux.HandleFunc("POST /v1/worlds/{world}/timelines/{timeline}/core-projections/reconcile", s.auth("projection_reconcile", s.handleProjectionReconcile))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/stream", s.auth("stream", s.handleStream))
 	return mux
 }

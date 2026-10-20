@@ -392,6 +392,102 @@ func TestReadinessRequiresCheckedReconcile(t *testing.T) {
 	}
 }
 
+func TestProjectionReconcileEndpointOpensRestoredEpoch(t *testing.T) {
+	dir := t.TempDir()
+	source, err := New(baseConfig(t, dir))
+	if err != nil {
+		t.Fatalf("source New: %v", err)
+	}
+	backupPath := filepath.Join(t.TempDir(), "backup.db")
+	if _, err := source.store.Backup(source.cfg.Scope, store.BackupOptions{
+		Path: backupPath, SourceRevision: "rev-reconcile", CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("backup: %v", err)
+	}
+	if _, err := source.store.Restore(backupPath, store.RestoreOptions{
+		OldScope: source.cfg.Scope, NewEpoch: "epoch-2", CompletedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	_ = source.Close()
+
+	cfg := baseConfig(t, dir)
+	cfg.Scope.TimelineEpoch = "epoch-2"
+	cfg.InitialState = nil
+	cfg.CoreProjectionActors = []ProjectionActorConfig{{ActorID: "mio", ActorInstanceID: "core-instance-mio"}}
+	target, err := New(cfg)
+	if err != nil {
+		t.Fatalf("target New: %v", err)
+	}
+	defer target.Close()
+	ts := httptest.NewServer(target.Handler())
+	defer ts.Close()
+	url := ts.URL + "/v1/worlds/rencrow-home/timelines/timeline-1/core-projections/reconcile"
+	body := func(epoch, revision string) []byte {
+		raw, err := json.Marshal(map[string]any{
+			"schema_version": 1, "timeline_epoch": epoch, "source_revision": revision,
+		})
+		if err != nil {
+			t.Fatalf("marshal reconcile: %v", err)
+		}
+		return raw
+	}
+
+	resp := doRequest(t, http.MethodPost, url, projectionToken, "", body("epoch-2", "core-revision-1"))
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("normal projection reconciled = %d", resp.StatusCode)
+	}
+	resp = doRequest(t, http.MethodPost, url, projectionReconcileToken, "", body("epoch-1", "core-revision-1"))
+	if got := decodeMap(t, resp); resp.StatusCode != http.StatusConflict || got["error"].(map[string]any)["code"] != "timeline_epoch_mismatch" {
+		t.Fatalf("wrong epoch = %d %v", resp.StatusCode, got)
+	}
+	resp = doRequest(t, http.MethodPost, url, projectionReconcileToken, "", body("epoch-2", ""))
+	if got := decodeMap(t, resp); resp.StatusCode != http.StatusBadRequest || got["error"].(map[string]any)["code"] != "invalid_source_revision" {
+		t.Fatalf("missing revision = %d %v", resp.StatusCode, got)
+	}
+	resp = doRequest(t, http.MethodPost, url, projectionReconcileToken, "", body("epoch-2", "core-revision-1"))
+	if got := decodeMap(t, resp); resp.StatusCode != http.StatusConflict || got["error"].(map[string]any)["code"] != "projection_not_found" {
+		t.Fatalf("missing projection = %d %v", resp.StatusCode, got)
+	}
+
+	validUntil := time.Now().UTC().Add(time.Hour)
+	apply := func(kind string) {
+		t.Helper()
+		if _, err := target.store.ApplyProjection(store.Projection{
+			Scope: cfg.Scope, ActorID: "mio", ActorInstanceID: "core-instance-mio",
+			Kind: kind, SourceEpoch: "core-epoch-1", SourceRevision: 1,
+			Payload: json.RawMessage(`{"kind":"` + kind + `"}`), PublisherID: "core-publisher",
+			CredentialID: "core", ValidUntil: validUntil, ReceivedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("apply %s: %v", kind, err)
+		}
+	}
+	apply(store.ProjectionKindWorkSet)
+	resp = doRequest(t, http.MethodPost, url, projectionReconcileToken, "", body("epoch-2", "core-revision-1"))
+	if got := decodeMap(t, resp); resp.StatusCode != http.StatusConflict || got["error"].(map[string]any)["code"] != "projection_not_found" {
+		t.Fatalf("missing policy = %d %v", resp.StatusCode, got)
+	}
+	apply(store.ProjectionKindLifePolicy)
+	resp = doRequest(t, http.MethodPost, url, projectionReconcileToken, "", body("epoch-2", "core-revision-1"))
+	got := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusOK || got["status"] != "reconciled" || got["required_projections"].(float64) != 2 {
+		t.Fatalf("reconcile = %d %v", resp.StatusCode, got)
+	}
+
+	resp = doRequest(t, http.MethodGet, ts.URL+"/health/ready", readerToken, "", nil)
+	ready := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusOK || ready["logical_ready"] != true {
+		t.Fatalf("ready after reconcile = %d %v", resp.StatusCode, ready)
+	}
+	cmd, _ := json.Marshal(map[string]any{
+		"action": "debug.noop", "timeline_epoch": "epoch-2", "payload": map[string]any{},
+	})
+	resp = doRequest(t, http.MethodPost, commandsURL(ts), writerToken, "reconcile-open-key", cmd)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("command after reconcile = %d %s", resp.StatusCode, readBody(t, resp))
+	}
+}
+
 func TestSnapshotAuthScopeAndMethod(t *testing.T) {
 	ts, _ := newTestServer(t, nil)
 	resp := doRequest(t, http.MethodGet, snapshotURL(ts), readerToken, "", nil)
