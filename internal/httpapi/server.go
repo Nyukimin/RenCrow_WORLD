@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Nyukimin/RenCrow_WORLD/internal/idmap"
 	"github.com/Nyukimin/RenCrow_WORLD/internal/store"
 )
 
@@ -120,13 +121,27 @@ func (s *Server) auth(scope string, next http.HandlerFunc) http.HandlerFunc {
 			writeAPIError(w, http.StatusForbidden, "forbidden", "the credential does not allow this operation")
 			return
 		}
-		if world := r.PathValue("world"); world != "" && world != s.cfg.Scope.WorldID {
-			writeAPIError(w, http.StatusForbidden, "scope_mismatch", "the request scope does not match this server")
-			return
+		if rawWorld := r.PathValue("world"); rawWorld != "" {
+			world, err := idmap.Decode(rawWorld)
+			if err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_scope_id", "the world path is not a valid transport ID")
+				return
+			}
+			if world != s.cfg.Scope.WorldID {
+				writeAPIError(w, http.StatusForbidden, "scope_mismatch", "the request scope does not match this server")
+				return
+			}
 		}
-		if timeline := r.PathValue("timeline"); timeline != "" && timeline != s.cfg.Scope.TimelineID {
-			writeAPIError(w, http.StatusForbidden, "scope_mismatch", "the request scope does not match this server")
-			return
+		if rawTimeline := r.PathValue("timeline"); rawTimeline != "" {
+			timeline, err := idmap.Decode(rawTimeline)
+			if err != nil {
+				writeAPIError(w, http.StatusBadRequest, "invalid_scope_id", "the timeline path is not a valid transport ID")
+				return
+			}
+			if timeline != s.cfg.Scope.TimelineID {
+				writeAPIError(w, http.StatusForbidden, "scope_mismatch", "the request scope does not match this server")
+				return
+			}
 		}
 		next(w, r)
 	}

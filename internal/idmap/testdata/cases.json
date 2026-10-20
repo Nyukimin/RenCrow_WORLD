@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "algorithm": "utf8-base64url-tilde-v1",
+  "cases": [
+    {"canonical": "mio", "transport": "mio"},
+    {"canonical": "rencrow-home", "transport": "rencrow-home"},
+    {"canonical": "1f-living", "transport": "1f-living"},
+    {"canonical": "a~b", "transport": "a~b"},
+    {"canonical": "ミオ", "transport": "~44Of44Kq"},
+    {"canonical": "世界", "transport": "~5LiW55WM"},
+    {"canonical": "ルミナ", "transport": "~44Or44Of44OK"},
+    {"canonical": "~mio", "transport": "~fm1pbw"},
+    {"canonical": "~", "transport": "~fg"},
+    {"canonical": "a b", "transport": "~YSBi"},
+    {"canonical": "a/b", "transport": "~YS9i"}
+  ]
+}

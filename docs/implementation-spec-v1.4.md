@@ -20,7 +20,7 @@ R05 compatibility requirements:
 - Do not change `spatial_ready: false` or fabricate coordinates. `position: null` and `measurement_status: unverified` remain unknown until measured geometry is accepted.
 - New persisted version/scope fields (`world_spec_revision`, `timeline_epoch`, `event_seq`, `state_seq`) are distinct from R05 `world_revision`.
 
-**Contract issue to resolve before freezing R06/R07 schemas:** the v1.4 contract README specifies ASCII machine IDs, while R05 identifiers are Unicode-capable opaque values. This target preserves R05 exact-ID behavior. Any ASCII transport identifier must use an explicitly specified, collision-free, reversible mapping that retains the original ID; normalization or an undocumented alias is not acceptable. The final schema, mapping, and cross-language tests are pending. Until then, R05 remains valid and no new API may claim complete R05 identifier compatibility.
+**Identifier compatibility decision:** the v1.4 contract README specifies ASCII machine IDs, while R05 identifiers are Unicode-capable opaque values. This target preserves R05 exact-ID behavior. [ID.md](ID.md) adopts the exact UTF-8 canonical ID plus the reversible `utf8-base64url-tilde-v1` ASCII transport mapping; R07 decodes it for `{world}` and `{timeline}` path segments. The Go implementation and language-neutral fixtures exist, but CORE/other-language adoption and complete schema freezing remain pending. No normalization or undocumented alias is permitted.
 
 ## 2. WORLD target model
 

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Nyukimin/RenCrow_WORLD/internal/idmap"
 	"github.com/Nyukimin/RenCrow_WORLD/internal/store"
 )
 
@@ -332,6 +333,31 @@ func TestSnapshotAuthScopeAndMethod(t *testing.T) {
 	}
 	if resp := doRequest(t, http.MethodGet, ts.URL+"/nope", readerToken, "", nil); resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("unknown route = %d", resp.StatusCode)
+	}
+}
+
+func TestASCIITransportPathScope(t *testing.T) {
+	ts, _ := newTestServer(t, func(c *Config) {
+		c.Scope = store.Scope{WorldID: "世界", TimelineID: "時間", TimelineEpoch: "epoch-1"}
+	})
+	world, err := idmap.Encode("世界")
+	if err != nil {
+		t.Fatalf("encode world: %v", err)
+	}
+	timeline, err := idmap.Encode("時間")
+	if err != nil {
+		t.Fatalf("encode timeline: %v", err)
+	}
+	path := ts.URL + "/v1/worlds/" + world + "/timelines/" + timeline + "/snapshot"
+	resp := doRequest(t, http.MethodGet, path, readerToken, "", nil)
+	body := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusOK || body["world_id"] != "世界" || body["timeline_id"] != "時間" {
+		t.Fatalf("transport path = %d %v", resp.StatusCode, body)
+	}
+	raw := ts.URL + "/v1/worlds/世界/timelines/時間/snapshot"
+	resp = doRequest(t, http.MethodGet, raw, readerToken, "", nil)
+	if errBody := decodeMap(t, resp); resp.StatusCode != http.StatusBadRequest || errBody["error"].(map[string]any)["code"] != "invalid_scope_id" {
+		t.Fatalf("raw unicode path = %d %v", resp.StatusCode, errBody)
 	}
 }
 
