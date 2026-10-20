@@ -12,7 +12,7 @@ go vet ./...
 
 echo "== R06 on-disk lifecycle + crash injection =="
 go test ./internal/store -count=1 -v \
-  -run 'TestE2ELifecycle|TestCrashRecovery|TestReplayHashIsDeterministic|TestAtomicCommitAndReceipt'
+  -run 'TestE2ELifecycle|TestCrashRecovery|TestReplayHashIsDeterministic|TestAtomicCommitAndReceipt|TestBackupCreatesVerifiedManifest|TestRestoreCreatesEpochAndRejectsOldCommands|TestE2EBackupRestoreAcrossReopen'
 
 echo "== R05 inspect regression =="
 go test ./cmd/rencrow-world ./internal/input ./internal/world -count=1 -v >/dev/null

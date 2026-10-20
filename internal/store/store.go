@@ -63,6 +63,11 @@ func (s Scope) valid() bool {
 		if v == "" || !utf8.ValidString(v) || strings.TrimSpace(v) != v {
 			return false
 		}
+		for _, r := range v {
+			if r < 0x20 || r == 0x7f {
+				return false
+			}
+		}
 	}
 	return true
 }
@@ -161,6 +166,7 @@ type Page struct {
 
 type Store struct {
 	db       *sql.DB
+	path     string
 	handlers map[string]Handler
 }
 
@@ -179,7 +185,7 @@ func Open(path string) (*Store, error) {
 	// recovery boundary simple. Reads share the same connection.
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-	s := &Store{db: db, handlers: map[string]Handler{}}
+	s := &Store{db: db, path: abs, handlers: map[string]Handler{}}
 	if err := s.migrate(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -203,6 +209,7 @@ func (s *Store) migrate() error {
 			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
 			event_seq INTEGER NOT NULL, state_seq INTEGER NOT NULL,
 			state_json BLOB NOT NULL, state_hash TEXT NOT NULL,
+			reconciled INTEGER NOT NULL DEFAULT 1, superseded_by TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (world_id, timeline_id, timeline_epoch))`,
 		`CREATE TABLE IF NOT EXISTS snapshot (
 			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
@@ -238,13 +245,60 @@ func (s *Store) migrate() error {
 			resource_id TEXT NOT NULL, actor_id TEXT NOT NULL, activity_id TEXT NOT NULL,
 			quantity INTEGER NOT NULL,
 			PRIMARY KEY (world_id, timeline_id, timeline_epoch, resource_id, actor_id, activity_id))`,
+		`CREATE TABLE IF NOT EXISTS recovery_gap (
+			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
+			from_seq INTEGER NOT NULL, to_seq INTEGER NOT NULL, reason TEXT NOT NULL,
+			recorded_at TEXT NOT NULL,
+			PRIMARY KEY (world_id, timeline_id, timeline_epoch, from_seq, to_seq, reason))`,
+		`CREATE TABLE IF NOT EXISTS epoch_reconcile (
+			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
+			source_revision TEXT NOT NULL, completed_at TEXT NOT NULL,
+			PRIMARY KEY (world_id, timeline_id, timeline_epoch))`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {
 			return err
 		}
 	}
+	// R06 databases created before backup/restore need the epoch gate columns.
+	for _, col := range []struct{ name, ddl string }{
+		{"reconciled", "INTEGER NOT NULL DEFAULT 1"},
+		{"superseded_by", "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := s.ensureColumn("timeline", col.name, col.ddl); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (s *Store) ensureColumn(table, column, ddl string) error {
+	rows, err := s.db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	found := false
+	for rows.Next() {
+		var cid int
+		var name, typ string
+		var notNull, pk int
+		var dflt any
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &dflt, &pk); err != nil {
+			return err
+		}
+		if name == column {
+			found = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if found {
+		return nil
+	}
+	_, err = s.db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + column + ` ` + ddl)
+	return err
 }
 
 func (s *Store) CreateTimeline(scope Scope, initial State, resources map[string]int64) error {
@@ -270,8 +324,8 @@ func (s *Store) CreateTimeline(scope Scope, initial State, resources map[string]
 	}
 	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO timeline
-		(world_id, timeline_id, timeline_epoch, event_seq, state_seq, state_json, state_hash)
-		VALUES (?, ?, ?, 0, 0, ?, ?)`, scope.WorldID, scope.TimelineID, scope.TimelineEpoch, raw, hash); err != nil {
+		(world_id, timeline_id, timeline_epoch, event_seq, state_seq, state_json, state_hash, reconciled, superseded_by)
+		VALUES (?, ?, ?, 0, 0, ?, ?, 1, '')`, scope.WorldID, scope.TimelineID, scope.TimelineEpoch, raw, hash); err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return ErrTimelineExists
 		}
@@ -325,6 +379,10 @@ func (s *Store) Append(cmd Command) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	reconciled, supersededBy, err := readEpochStatus(ctx, tx, cmd.Scope)
+	if err != nil {
+		return Result{}, err
+	}
 
 	reject := func(reason string) (Result, error) {
 		r := Receipt{
@@ -340,6 +398,12 @@ func (s *Store) Append(cmd Command) (Result, error) {
 		return Result{Receipt: r}, nil
 	}
 
+	if supersededBy != "" {
+		return reject("epoch_superseded")
+	}
+	if !reconciled {
+		return reject("epoch_not_reconciled")
+	}
 	if cmd.ExpectedStateSeq != nil && *cmd.ExpectedStateSeq != stateSeq {
 		return reject("state_conflict")
 	}
