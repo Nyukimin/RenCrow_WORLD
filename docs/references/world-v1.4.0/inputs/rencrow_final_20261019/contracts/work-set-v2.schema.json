@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rencrow.local/world/work-set-v2.schema.json",
+  "title": "RenCrow WORLD FullActorWorkSet v2",
+  "description": "CORE-owned, complete current nonterminal assigned works for one Actor; queued Task may have no Run.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {"const": "rencrow.world.work-set/v2"},
+    "world_id": {"type": "string", "minLength": 1},
+    "actor_id": {"type": "string", "minLength": 1},
+    "source_owner": {"const": "CORE"},
+    "source_epoch": {"type": "string", "minLength": 1},
+    "source_revision": {"type": "integer", "minimum": 1},
+    "valid_until": {"type": "string", "format": "date-time"},
+    "active_work": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {"type": "string", "minLength": 1},
+          "run_id": {"type": "string", "minLength": 1},
+          "execution_state": {"type": "string", "enum": ["queued", "running", "waiting", "blocked"]},
+          "work_class": {"const": "assigned_work"},
+          "requires_house_presence": {"type": "boolean"},
+          "classification_reason_code": {"type": "string", "minLength": 1}
+        },
+        "required": ["task_id", "execution_state", "work_class", "requires_house_presence", "classification_reason_code"],
+        "allOf": [{"if": {"properties": {"execution_state": {"const": "running"}}, "required": ["execution_state"]}, "then": {"required": ["run_id"]}}]
+      }
+    }
+  },
+  "required": ["contract_version", "world_id", "actor_id", "source_owner", "source_epoch", "source_revision", "valid_until", "active_work"]
+}

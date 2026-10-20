@@ -1,0 +1,1208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.world.invalid/world.contracts/v1/common.schema.json",
+  "title": "WORLD v1.4.0 common contract design",
+  "description": "Proposed contract; schema validation is structural, not authorization, canon adoption, or runtime acceptance. Resolve the bundled WorkSet v2 schema locally.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/Command"
+    },
+    {
+      "$ref": "#/$defs/Receipt"
+    },
+    {
+      "$ref": "#/$defs/WorldTransaction"
+    },
+    {
+      "$ref": "#/$defs/WorldSnapshot"
+    },
+    {
+      "$ref": "#/$defs/Timeline"
+    },
+    {
+      "$ref": "#/$defs/ExecutionProfile"
+    },
+    {
+      "$ref": "#/$defs/CoreProjectionEnvelope"
+    },
+    {
+      "$ref": "#/$defs/ObservationCandidate"
+    }
+  ],
+  "$defs": {
+    "Identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "not": {
+        "pattern": "[^A-Za-z0-9._:-]"
+      }
+    },
+    "Sequence": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "UtcTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$",
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
+    },
+    "Sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "minLength": 64,
+      "maxLength": 64
+    },
+    "Scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_epoch": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "world_id",
+        "timeline_id",
+        "timeline_epoch"
+      ]
+    },
+    "WorldTime": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clock_profile_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "tick": {
+          "$ref": "#/$defs/Sequence"
+        }
+      },
+      "required": [
+        "clock_profile_id",
+        "tick"
+      ]
+    },
+    "Dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "resource_type": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "resource_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "revision": {
+          "$ref": "#/$defs/Sequence"
+        }
+      },
+      "required": [
+        "resource_type",
+        "resource_id",
+        "revision"
+      ]
+    },
+    "Concurrency": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "const": "strict_state"
+            },
+            "expected_state_seq": {
+              "$ref": "#/$defs/Sequence"
+            }
+          },
+          "required": [
+            "mode",
+            "expected_state_seq"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "mode": {
+              "const": "dependencies"
+            },
+            "observed_state_seq": {
+              "$ref": "#/$defs/Sequence"
+            },
+            "dependencies": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Dependency"
+              },
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "mode",
+            "observed_state_seq",
+            "dependencies"
+          ]
+        }
+      ]
+    },
+    "Command": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "world.contracts/v1"
+        },
+        "record_type": {
+          "const": "Command"
+        },
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_epoch": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "world_spec_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "actor_instance_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "action_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "concurrency": {
+          "$ref": "#/$defs/Concurrency"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/UtcTime"
+        },
+        "arguments": {
+          "type": "object",
+          "description": "Validate against the registered action schema in the pinned WorldBundle; unknown actions and arbitrary code are forbidden."
+        }
+      },
+      "required": [
+        "contract_version",
+        "record_type",
+        "world_id",
+        "timeline_id",
+        "timeline_epoch",
+        "world_spec_revision",
+        "idempotency_key",
+        "actor_instance_id",
+        "action_id",
+        "concurrency",
+        "expires_at",
+        "arguments"
+      ]
+    },
+    "Receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "world.contracts/v1"
+        },
+        "record_type": {
+          "const": "Receipt"
+        },
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_epoch": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "receipt_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "authenticated_client_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "idempotency_key": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "request_digest": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/UtcTime"
+        },
+        "status": {
+          "enum": [
+            "committed",
+            "rejected"
+          ]
+        },
+        "transaction_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "result_event_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "state_seq": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Sequence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "error_code": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "contract_version",
+        "record_type",
+        "world_id",
+        "timeline_id",
+        "timeline_epoch",
+        "receipt_id",
+        "authenticated_client_id",
+        "idempotency_key",
+        "request_digest",
+        "recorded_at",
+        "status",
+        "transaction_id",
+        "result_event_ids",
+        "state_seq",
+        "error_code"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "committed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "transaction_id": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "result_event_ids": {
+                "minItems": 1
+              },
+              "state_seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "error_code": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "rejected"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "transaction_id": {
+                "type": "null"
+              },
+              "result_event_ids": {
+                "maxItems": 0
+              },
+              "state_seq": {
+                "type": "null"
+              },
+              "error_code": {
+                "$ref": "#/$defs/Identifier"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "WorldEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "event_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "transaction_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 127
+        },
+        "event_type": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "payload_schema_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "actor_instance_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "world_time": {
+          "$ref": "#/$defs/WorldTime"
+        },
+        "access_policy_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "assumption_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "occurred_at": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/UtcTime"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "payload": {
+          "type": "object",
+          "description": "Server-produced payload validated with payload_schema_id from the pinned registry."
+        }
+      },
+      "required": [
+        "event_id",
+        "event_seq",
+        "transaction_index",
+        "event_type",
+        "payload_schema_id",
+        "actor_instance_id",
+        "world_time",
+        "access_policy_ref",
+        "assumption_refs",
+        "occurred_at",
+        "payload"
+      ]
+    },
+    "WorldTransaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "world.contracts/v1"
+        },
+        "record_type": {
+          "const": "WorldTransaction"
+        },
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_epoch": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "world_spec_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "transaction_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "caused_by_receipt_id": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/UtcTime"
+        },
+        "before_state_seq": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "after_state_seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorldEvent"
+          },
+          "minItems": 1,
+          "maxItems": 128
+        }
+      },
+      "required": [
+        "contract_version",
+        "record_type",
+        "world_id",
+        "timeline_id",
+        "timeline_epoch",
+        "world_spec_revision",
+        "transaction_id",
+        "caused_by_receipt_id",
+        "recorded_at",
+        "before_state_seq",
+        "after_state_seq",
+        "events"
+      ]
+    },
+    "WorldSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "world.contracts/v1"
+        },
+        "record_type": {
+          "const": "WorldSnapshot"
+        },
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_epoch": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "world_spec_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "state_seq": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "recorded_at": {
+          "$ref": "#/$defs/UtcTime"
+        },
+        "engine_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "state_schema_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "state_hash": {
+          "$ref": "#/$defs/Sha256"
+        },
+        "state": {
+          "type": "object",
+          "description": "Authoritative event-derived state. Clock anchors and valid_until are stored; current extrapolated time/freshness are not."
+        }
+      },
+      "required": [
+        "contract_version",
+        "record_type",
+        "world_id",
+        "timeline_id",
+        "timeline_epoch",
+        "snapshot_id",
+        "world_spec_revision",
+        "state_seq",
+        "recorded_at",
+        "engine_revision",
+        "state_schema_id",
+        "state_hash",
+        "state"
+      ]
+    },
+    "ContextOrigin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "actor_instance_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "context_snapshot_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "context_cursor": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "policy_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "context_hash": {
+          "$ref": "#/$defs/Sha256"
+        }
+      },
+      "required": [
+        "actor_instance_id",
+        "context_snapshot_id",
+        "context_cursor",
+        "policy_revision",
+        "context_hash"
+      ]
+    },
+    "ForkOrigin": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_epoch": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "snapshot_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "state_seq": {
+          "$ref": "#/$defs/Sequence"
+        },
+        "context_origins": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextOrigin"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        }
+      },
+      "required": [
+        "world_id",
+        "timeline_id",
+        "timeline_epoch",
+        "snapshot_id",
+        "state_seq",
+        "context_origins"
+      ]
+    },
+    "Timeline": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "world.contracts/v1"
+        },
+        "record_type": {
+          "const": "Timeline"
+        },
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_epoch": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "active_world_spec_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "purpose": {
+          "enum": [
+            "live",
+            "fiction",
+            "simulation",
+            "rehearsal",
+            "performance"
+          ]
+        },
+        "clock_mode": {
+          "enum": [
+            "real_time",
+            "turn_based",
+            "event_driven",
+            "paused"
+          ]
+        },
+        "canon_scope": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "canon_policy": {
+          "enum": [
+            "operational_commits",
+            "explicit_release",
+            "none"
+          ]
+        },
+        "memory_writeback_policy_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "fork_origin": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ForkOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "contract_version",
+        "record_type",
+        "world_id",
+        "timeline_id",
+        "timeline_epoch",
+        "active_world_spec_revision",
+        "purpose",
+        "clock_mode",
+        "canon_scope",
+        "canon_policy",
+        "memory_writeback_policy_ref",
+        "fork_origin"
+      ]
+    },
+    "ProfileParameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "parameter_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "availability": {
+          "enum": [
+            "resolved",
+            "unset"
+          ]
+        },
+        "basis": {
+          "enum": [
+            "author_adopted",
+            "implementation_assumption",
+            "measured",
+            "derived",
+            null
+          ]
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean",
+            "null"
+          ]
+        },
+        "unit": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Identifier"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "application_scope": {
+          "enum": [
+            "operational",
+            "world_model"
+          ]
+        },
+        "source_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true
+        },
+        "assumption_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "derived_from": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "parameter_id",
+        "availability",
+        "basis",
+        "value",
+        "unit",
+        "application_scope",
+        "source_refs",
+        "assumption_refs",
+        "derived_from"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "const": "unset"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "basis": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "availability": {
+                "const": "resolved"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "not": {
+                  "type": "null"
+                }
+              },
+              "basis": {
+                "not": {
+                  "type": "null"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "basis": {
+                "const": "implementation_assumption"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "assumption_refs": {
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "basis": {
+                "const": "derived"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "derived_from": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ExecutionProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "world.contracts/v1"
+        },
+        "record_type": {
+          "const": "ExecutionProfile"
+        },
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "profile_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "lore_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "profile_kind": {
+          "enum": [
+            "production",
+            "simulation"
+          ]
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 256,
+          "uniqueItems": true
+        },
+        "parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ProfileParameter"
+          },
+          "minItems": 0,
+          "maxItems": 4096
+        },
+        "handler_registry_revision": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "contract_version",
+        "record_type",
+        "world_id",
+        "profile_revision",
+        "lore_revision",
+        "profile_kind",
+        "capabilities",
+        "parameters",
+        "handler_registry_revision"
+      ]
+    },
+    "LifePolicyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "world.life-policy/v1"
+        },
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_owner": {
+          "const": "CORE"
+        },
+        "source_epoch": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "valid_until": {
+          "$ref": "#/$defs/UtcTime"
+        },
+        "persona_revision": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "allowed_non_cognitive_activity_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "expired_fallback_activity_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 0,
+          "maxItems": 16,
+          "uniqueItems": true
+        },
+        "condition_profile_ref": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": [
+        "contract_version",
+        "world_id",
+        "actor_id",
+        "source_owner",
+        "source_epoch",
+        "source_revision",
+        "valid_until",
+        "persona_revision",
+        "allowed_non_cognitive_activity_ids",
+        "expired_fallback_activity_ids",
+        "condition_profile_ref"
+      ]
+    },
+    "CoreProjectionEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "world.contracts/v1"
+        },
+        "record_type": {
+          "const": "CoreProjectionEnvelope"
+        },
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_epoch": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "actor_instance_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "projection_kind": {
+          "enum": [
+            "full_actor_work_set",
+            "life_policy"
+          ]
+        },
+        "payload": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "contract_version",
+        "record_type",
+        "world_id",
+        "timeline_id",
+        "timeline_epoch",
+        "actor_instance_id",
+        "projection_kind",
+        "payload"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "projection_kind": {
+                "const": "full_actor_work_set"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "allOf": [
+                  {
+                    "$ref": "https://schemas.rencrow.local/world/work-set-v2.schema.json"
+                  },
+                  {
+                    "properties": {
+                      "source_revision": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "projection_kind": {
+                "const": "life_policy"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/LifePolicyPayload"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ObservationCandidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contract_version": {
+          "const": "world.contracts/v1"
+        },
+        "record_type": {
+          "const": "ObservationCandidate"
+        },
+        "world_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "timeline_epoch": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "observation_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "observer_actor_instance_id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "event_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "minItems": 1,
+          "maxItems": 128,
+          "uniqueItems": true
+        },
+        "world_time": {
+          "$ref": "#/$defs/WorldTime"
+        },
+        "perception_method": {
+          "enum": [
+            "direct",
+            "audible",
+            "reported",
+            "record_read"
+          ]
+        },
+        "access_policy_ref": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "facts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "fact_id": {
+                "$ref": "#/$defs/Identifier"
+              },
+              "claim": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 4096
+              },
+              "evidence_event_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Identifier"
+                },
+                "minItems": 1,
+                "maxItems": 128,
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "fact_id",
+              "claim",
+              "evidence_event_ids"
+            ]
+          },
+          "minItems": 1,
+          "maxItems": 128
+        },
+        "delivery_state": {
+          "const": "candidate"
+        }
+      },
+      "required": [
+        "contract_version",
+        "record_type",
+        "world_id",
+        "timeline_id",
+        "timeline_epoch",
+        "observation_id",
+        "observer_actor_instance_id",
+        "event_ids",
+        "world_time",
+        "perception_method",
+        "access_policy_ref",
+        "facts",
+        "delivery_state"
+      ]
+    }
+  }
+}

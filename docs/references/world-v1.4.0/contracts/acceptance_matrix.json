@@ -1,0 +1,653 @@
+[
+  {
+    "id": "W14-AC-001",
+    "title": "世界定義の公開範囲と不変版",
+    "layer": "runtime_contract",
+    "setup": [
+      "隔離した試験Worldに、実行可能なmoveと必須数値未決のexperimental_actionを含む定義を用意する。",
+      "同じLoreから本編用Profileとimplementation_assumptionを含むsimulation用Profileを用意する。"
+    ],
+    "steps": [
+      "実装されたCompiler/Validatorへ両Profileを入力する。",
+      "moveだけを公開し、未定値を要するActionを本編Timelineから要求する。",
+      "simulationで仮値を使うActionを実行し、発生Eventの出所を確認する。",
+      "公開済みの同一world_spec_revisionを別内容で上書きしようとする。"
+    ],
+    "expected": [
+      "確定済みCapabilityは実行でき、未定のActionだけがneeds_parameter等の未実行結果になる。",
+      "仮定とassumption_refが試験結果へ残り、本編Canonへ自動昇格しない。",
+      "公開済み版の内容上書きを拒否し、変更は新Revisionになる。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "公開検査レポート、定義版とhashの一覧",
+      "Action Receipt、simulation Event、Canon差分"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-002",
+    "title": "Event・State・予約・Receiptの原子的Commit",
+    "layer": "runtime_kernel",
+    "setup": [
+      "一つのCommandが3 Event、Actor位置変更、予約、Receiptを生成するfixtureを用意する。",
+      "DBは試験用の実永続Storeを使用し、Commit前後へ停止注入点を設ける。"
+    ],
+    "steps": [
+      "正常実行し、Event順序と最終Stateを保存する。",
+      "Event書込み後、State更新後、Receipt保存後、DB Commit直後の各注入点で別試行を強制終了する。",
+      "各試行を再起動し、API・Store・Snapshot・Streamから確定状態を取得する。"
+    ],
+    "expected": [
+      "各試行は全変更なし、または3 Eventと全State/予約/Receiptの確定済み状態のいずれかになる。",
+      "transaction途中の状態をSnapshot/Streamへ公開しない。",
+      "確定群は同じtransaction_idと連続event_seqを持ち、state_seqは群の末尾を指す。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "停止注入点ごとのDB整合結果と再起動ログ",
+      "transaction/Event/State/予約/Receiptの照合表",
+      "Snapshot/Stream取得記録"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-003",
+    "title": "応答喪失後の冪等再送とpayload不一致",
+    "layer": "runtime_kernel",
+    "setup": [
+      "宛先world/timeline/epoch、認証client、idempotency_keyを固定したCommandを用意する。"
+    ],
+    "steps": [
+      "CommandのCommit後にHTTP応答だけを破棄する。",
+      "同じCommandを同じkeyで3回再送する。",
+      "同じkeyの引数を一つ変更して再送する。"
+    ],
+    "expected": [
+      "同内容の再送は元と同じReceipt/transaction/Event参照を返し、状態効果は1回だけになる。",
+      "異内容の再利用はidempotency_conflictとして拒否し、StateとEvent列を変えない。",
+      "再送をCORE/Toolの再実行へ結び付けない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "受信要求digestとReceipt対応表",
+      "Event数・資源数・外部呼出し回数の前後比較"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-004",
+    "title": "CORE投影の順序・source epoch・永続発行",
+    "layer": "runtime_integration",
+    "setup": [
+      "Actor A/Bそれぞれにlife_policy/work_setの独立した発行列を用意する。",
+      "COREの実Outbox/発行元Storeを試験環境で使用する。"
+    ],
+    "steps": [
+      "A/work_setへ同世代のrev=10、9、10同digest、10異digest、11をこの順で送る。",
+      "A/life_policyとB/work_setに別の連番を送り、列間で比較されないことを確認する。",
+      "COREを通常再起動し、同じsource_epochで連番を継続する。",
+      "未承認の新source_epochを送った後、認証済みreconcileで新世代へ切り替え、旧世代の大きいrevを送る。"
+    ],
+    "expected": [
+      "古いrevと同版異digestを拒否し、同版同digestは効果を重複させない。",
+      "Actor/投影種別をまたいでrevを比較せず、通常再起動で世代や連番を巻き戻さない。",
+      "世代切替はreconcile時だけ成立し、切替後の旧世代を拒否する。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "Outbox/issuer状態の再起動前後記録",
+      "世代・連番・digest・受付結果の照合表"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-005",
+    "title": "復元後のtimeline epoch拒否とCORE再同期",
+    "layer": "runtime_recovery",
+    "setup": [
+      "epoch E1、state_seq=100の隔離Backupを作る。",
+      "旧履歴でexpected_state_seq=100の未着Commandと未着CORE投影を保存し、その後の履歴も作る。"
+    ],
+    "steps": [
+      "通常再起動ではepochが変わらないことを確認する。",
+      "Backupから復元してE2へ世代を更新し、旧Command・旧Receipt参照・旧cursor・旧宛先世代の投影を再送する。",
+      "E2宛てのCORE full reconcileを完了してから、新しいCommand/投影を送る。"
+    ],
+    "expected": [
+      "seqが同じ100でもE1宛ての変更要求はE2で受理されず、状態効果0になる。",
+      "Receipt/冪等性のnamespaceが履歴世代を区別し、旧Receiptを新履歴の実行結果と扱わない。",
+      "reconcile前の古い投影で動作を再開せず、E2の明示同期後にだけ新規更新を受理する。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "復元manifestとepoch遷移記録",
+      "旧/新要求の受付結果、State/Event差分",
+      "CORE reconcile完了Receipt"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-006",
+    "title": "real_time Actionの依存集合再検証",
+    "layer": "runtime_integration",
+    "setup": [
+      "Actor AのIntentがA・椅子X・経路Pに依存するfixtureを用意する。",
+      "無関係なActor Bと、別設備Yを更新できるreal_time Timelineを使う。"
+    ],
+    "steps": [
+      "Aの観測後、Intent返却前にB/Yを更新する。",
+      "Aの同じ構造化Intentを現在Stateで再検証してCommitする。",
+      "別試行ではIntent返却前に椅子Xを他Actorが占有する。"
+    ],
+    "expected": [
+      "無関係な更新だけなら同じIntentを再検証して実行できる。全体seq差だけでLLM再判断を無限に繰り返さない。",
+      "依存する椅子・経路・Actor前提が変わった試行は拒否または再計画となり、二重占有しない。",
+      "検証した依存版と採否理由を追跡できる。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "観測・依存集合・現在版・Receiptのtrace",
+      "CORE判断回数、Commit回数、設備占有記録"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-007",
+    "title": "編集・turn_based操作の厳格CAS",
+    "layer": "runtime_kernel",
+    "setup": [
+      "厳格CASを使用する編集またはturn_basedのfixtureを、state_seq=20で用意する。"
+    ],
+    "steps": [
+      "同じseq=20に基づく二つの変更要求を作る。",
+      "一方をCommitしてから他方を送る。",
+      "最新Observationを取得し、新keyと新しいexpected_state_seqで後者を再提出する。"
+    ],
+    "expected": [
+      "古い要求はstate_conflictとなり、世界内の効果を生まない。",
+      "新しい状態に対して認可・前提を再確認した要求だけ実行できる。",
+      "拒否のReceiptと、世界内で試みて失敗したEventを区別する。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "2要求と再提出のReceipt",
+      "state_seq/Event列/状態hashの比較"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-008",
+    "title": "複数資源の全件予約と解放",
+    "layer": "runtime_kernel",
+    "setup": [
+      "一人用椅子、残量1の飲料資源、必要設備を共有する2 Actorを用意する。",
+      "飲料は開始時に予約し、完了時に消費するRuleとして固定する。"
+    ],
+    "steps": [
+      "両Actorから必要資源をまとめた開始要求を並行送信する。",
+      "成功したActivityを消費前にcancelし、予約を調べる。",
+      "再度Activityを開始・完了させる。別試行で訪問終了/移動取消も注入する。"
+    ],
+    "expected": [
+      "全資源の予約成功は一方だけで、他方の部分予約や負在庫が残らない。",
+      "取消時は未消費予約を解放し、完了時だけ規定の資源消費が一度起きる。",
+      "退去・中断後に孤立予約が残らず、Actor位置と占有が矛盾しない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "並行実行trace、予約/在庫/Activityの状態表",
+      "cancel/complete/visitor終了のEventとReceipt"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-009",
+    "title": "長時間Activityと実仕事移動の独立",
+    "layer": "runtime_integration",
+    "setup": [
+      "2Fから1Fへ移動可能な論理fixtureと、COREの実仕事Runを用意する。",
+      "移動中にWorkSetを変更できる制御点を設ける。"
+    ],
+    "steps": [
+      "runningかつHOUSE presence必要な仕事を開始する。",
+      "Actorが階段移動中の間もCORE処理を継続させる。",
+      "移動途中で仕事を終端にし、freshな空WorkSetを送る。"
+    ],
+    "expected": [
+      "COREの仕事が移動/着席完了にブロックされない。",
+      "仕事終了後の経路中断・安全な停止・予約解除をWORLDが処理する。",
+      "一Actorのprimary Activityと位置は一つで、到着を仕事成功の根拠にしない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "CORE Run時間とWORLD経路Eventの時系列",
+      "位置/経路/予約/WorkPresentationの推移"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-010",
+    "title": "Event再生hashと派生時計・freshnessの分離",
+    "layer": "runtime_recovery",
+    "setup": [
+      "Clock anchor、倍率、valid_untilを持つ確定Event列とSnapshotを用意する。",
+      "Replay用時計とlive復帰用時計を独立して注入できるようにする。"
+    ],
+    "steps": [
+      "同じSnapshot/Event列を、実時間が期限前の環境と期限後の環境でReplayする。",
+      "正本State hashを比較し、表示用の現在時刻/freshnessを別に取得する。",
+      "live復帰後に期限を跨がせ、活動に影響する期限切れ処理を実行する。",
+      "上限を超える停止時間を注入して限定catch-upを行う。"
+    ],
+    "expected": [
+      "Replayの正本hashは一致し、読取時の外挿時計/freshnessで変化しない。",
+      "Replay中は現在時刻を使って新規期限切れEventを作らない。",
+      "live復帰後の期限による実状態変更はEventとなり、超過区間はrecovery_gap等で記録する。",
+      "停止中の会話・調査・記憶や外部Tool副作用を生成/再実行しない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "Replay前後hashとhash対象フィールド定義",
+      "注入時計と派生Viewの比較",
+      "期限切れ/catch-up Event、外部呼出しカウンタ"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-011",
+    "title": "CORE不通・LifePolicy期限切れ中の安全な生活",
+    "layer": "runtime_integration",
+    "setup": [
+      "8住人の許可済み非認知LifePolicyを保存し、CORE/PORTALを別プロセスとして接続する。",
+      "期限後も許すidle/restを明示し、LLM/Tool dispatchを計数する。"
+    ],
+    "steps": [
+      "PORTALを停止し、次にCOREを停止する。",
+      "注入時計でLifePolicyの期限を跨ぎ、世界時間で30分の生活を進める。",
+      "COREを復帰させ、Policy/WorkSetを再同期する。"
+    ],
+    "expected": [
+      "PORTAL/CORE不在でも許可済み非認知生活が進み、期限後は明示された保守的動作だけになる。",
+      "WORLDからのLLM/Tool呼出し、新しい発話、知的達成は0である。",
+      "未承認Policyへ暗黙fallbackせず、再同期後にだけ許可範囲を更新する。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "8 Actorの生活EventとPolicy適用版",
+      "プロセス停止/復帰trace",
+      "LLM/Tool/会話dispatch計数"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-012",
+    "title": "WorkSetのqueued・running・通常Chatの分類",
+    "layer": "runtime_contract",
+    "setup": [
+      "WorkSet v2のqueued/no-run、running/runあり、running/runなし、terminal混入、通常Chatを試験入力にする。"
+    ],
+    "steps": [
+      "CORE側生成とWORLD側受付の両方へ各入力を通す。",
+      "queuedを適用後、同Taskの実Runを開始して新版runningを送る。",
+      "通常ChatにTask記録があるケースを流す。"
+    ],
+    "expected": [
+      "queued/no-runは合法だが仕事場へ移動しない。",
+      "running/no-runとactive_work内のterminalを拒否する。",
+      "running/runありかつHOUSE presence必要の時だけ仕事場表現を始める。",
+      "通常Chatだけでは強制移動しない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "各正/負入力とOwner両側の判定",
+      "CORE Task/Runと移動Eventの対応表"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-013",
+    "title": "WorkSet全量再同期・終端通知欠落・staleと空Set",
+    "layer": "runtime_integration",
+    "setup": [
+      "ActorにrunningのTask A/Bを持たせ、期限を短くしたWorkSetを適用する。",
+      "通信層で個別の終端通知とOutbox応答を破棄できるようにする。"
+    ],
+    "steps": [
+      "Aを終端にし、その通知を落としたうえでBだけを含むfreshな全量Setを送る。",
+      "CORE通信を遮断してSetを期限切れにする。",
+      "Bも終了させ、再接続時に最新のfreshな空Setを先に送る。",
+      "その後に遅延した古いA/B入りSetを届ける。"
+    ],
+    "expected": [
+      "Aが消えてもBがrunningなら全仕事解除しない。",
+      "stale中はunknown/保守的動作で、成功や自由生活への帰還を推定しない。",
+      "最新の全量Setでのみ整合し、古い遅延Setは復活させない。",
+      "空Setを全仕事成功という結果に変換しない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "Task終端、Outbox配送、全量Setの時系列",
+      "WorkPresentation/Activity/位置の推移",
+      "逆順要求のReceipt"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-014",
+    "title": "実仕事結果と世界内演出・外部再実行の分離",
+    "layer": "runtime_integration",
+    "setup": [
+      "隔離されたCORE/Harnessで、成果Artifactと結果Receiptを作る有限の試験Jobを用意する。",
+      "通常Chat、作業姿勢、実Jobの実行を区別して計数する。"
+    ],
+    "steps": [
+      "WORLDを停止したまま試験Jobを実行・完了させる。",
+      "WORLDを復帰し、WorkSetと実結果Receipt参照を再送する。",
+      "同じ結果参照を重複送信する。別試行では作業姿勢だけを完了させる。",
+      "Kuro本格仕事中と四神の依頼なし自由時間も計測する。"
+    ],
+    "expected": [
+      "WORLD停止や投影失敗でCORE Jobの成否が変わらず、外部Jobは一度だけ実行される。",
+      "成功は実結果Receipt/成果参照に根拠を持ち、姿勢完了だけでは認知/仕事成功を作らない。",
+      "Kuro本格仕事中の生活LLMと四神の依頼なしCoder推論は0である。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "CORE/Harness Job Receipt、Artifact hash、実行回数",
+      "WORLDの結果参照Eventと表示Event",
+      "Actor別LLM dispatch計数"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-015",
+    "title": "transactionを分割しないページングと上限",
+    "layer": "runtime_kernel",
+    "setup": [
+      "1ページ4 Event相当、一transaction最大4 Eventの試験設定を用意する。",
+      "3 Eventのtransaction T1と2 EventのT2を確定する。"
+    ],
+    "steps": [
+      "Event一覧を先頭から上限4で取得し、次cursorで続きを取得する。",
+      "Snapshot/Streamも取得してtransaction境界を照合する。",
+      "5 Eventを生成する一Commandを送る。"
+    ],
+    "expected": [
+      "T1とT2を途中で切らず、返却ページに確定したtransaction全体だけを含める。",
+      "cursorは確定transaction境界を示し、Snapshot/Streamと整合する。",
+      "上限超過のCommandはCommit前に拒否するか、明示された複数transaction Activityへ展開し、途中配信禁止を破らない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "ページ内容/境界/cursorとtransaction一覧",
+      "超過要求の計画・Receipt・DB差分"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-016",
+    "title": "Viewerのbefore/after投影とprivate redaction",
+    "layer": "runtime_security",
+    "setup": [
+      "Ownerと制限Viewerを用意し、Actorがpublic roomからprivate zoneへ移動できるfixtureを使う。",
+      "一transactionに公開位置変更と非公開情報変更が混在するケースを作る。"
+    ],
+    "steps": [
+      "両scopeのSnapshotを取得する。",
+      "Actorをprivateへ移動させ、秘密フィールドも同transactionで更新する。",
+      "公開への復帰と、公開投影に全く影響しない秘密Eventを追加する。"
+    ],
+    "expected": [
+      "制限Viewerには投影Stateのbefore/after差分に相当する追加/削除/redactionが届き、幽霊Actorが残らない。",
+      "private情報を同transactionの他変更に便乗して送らない。",
+      "公開投影に変化がない秘密Eventでview cursorを進めず、発生数・間隙を露出しない。",
+      "Ownerと制限Viewerそれぞれの最終状態が同scopeの新Snapshotと一致する。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "scope別のSnapshot/ViewDeltaと投影比較",
+      "秘匿フィールド/Actor削除の検査結果"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-017",
+    "title": "SSEの再接続・欠落・scope変更とSnapshot境界",
+    "layer": "runtime_browser",
+    "setup": [
+      "cursor保持数と配信bufferを小さくした試験環境で、更新を継続するWorldを用意する。"
+    ],
+    "steps": [
+      "Snapshot取得中にもEventを発生させ、同じ境界からStream購読する。",
+      "同一Deltaの再送、順序の飛び、buffer超過、期限切れcursorを順に注入する。",
+      "Viewer権限を変更し、旧view cursorで再接続する。"
+    ],
+    "expected": [
+      "取得中の確定更新を取りこぼさず、重複を二重適用しない。",
+      "欠落・期限切れ・scope不一致は新Snapshotへ切り替え、部分Stateのまま継続しない。",
+      "権限変更でview世代を更新し、旧scopeの情報・cursorを新scopeへ流用しない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "ブラウザ通信traceとcursor系列",
+      "各復帰後Viewと新Snapshotの一致結果",
+      "権限変更前後の表示/データ記録"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-018",
+    "title": "別室private観測と配達・経験受理の分離",
+    "layer": "runtime_security",
+    "setup": [
+      "Actor Aはprivate room、Bは別室、Operatorは全知Readerというfixtureを用意する。",
+      "Aの非公開Action/発話、Bへの未配達ObservationCandidateを生成可能にする。"
+    ],
+    "steps": [
+      "Aのprivate出来事を記録し、BのObservation/Diary Context/Viewerを取得する。",
+      "Operatorが同じEventを読む。",
+      "B向けCandidateを作るが配達しない試行、配達してCOREが不受理にする試行、受理する試行を分ける。"
+    ],
+    "expected": [
+      "別室Bにprivate本文・出来事・その秘密を露出する拒否理由を配信しない。",
+      "Operator閲覧だけでBの知識を増やさない。",
+      "観測可能・配達済み・本人の経験受理・長期Memory保存を別状態/Receiptで追跡する。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "scope別Observation/Contextと伏字済みアクセスtrace",
+      "Candidate/Delivery/採否/Memoryの対応表"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-019",
+    "title": "ForkのContextSnapshotと分岐後の知識隔離",
+    "layer": "runtime_integration",
+    "setup": [
+      "親Timelineの分岐点T0以前にActorが知った事実K1、以後に知る秘密K2を用意する。",
+      "T0のWorldSnapshotとCORE/CHARのContextSnapshot参照を固定する。"
+    ],
+    "steps": [
+      "T0から子TimelineをForkし、ActorInstanceと推論Sessionを分離する。",
+      "親がK2を知った後で子のContext/行動判断を取得する。",
+      "子で新経験K3を作り、親Contextを再取得する。",
+      "許可された親の固定出典参照と、任意の親の未来参照をそれぞれ検証する。"
+    ],
+    "expected": [
+      "子はT0で取得済みのK1を保持し、親の未来K2を取得しない。",
+      "子のK3を親へ自動還流させない。",
+      "Fork起点の読み取り専用出典参照は有効で、任意のcross-Timeline参照は拒否する。",
+      "同じPersonaを利用してもSession/Contextを共有しない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "World/Context Snapshot ID・cursor・hash・policy",
+      "親子のContextと知識根拠比較",
+      "ActorInstance/Session scope対応表"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-020",
+    "title": "World・Timeline・Actor scopeと正史/記憶の隔離",
+    "layer": "runtime_security",
+    "setup": [
+      "HOUSE、物語、試験の独立World/Timelineに同名Actorを置く。",
+      "Worldごとにprincipal/capabilityを設定する。"
+    ],
+    "steps": [
+      "別Worldの対象IDを通常Command、結果参照、Snapshot queryへ混ぜて送る。",
+      "HOUSE専用CORE操作を物語Controllerから呼ぶ。",
+      "作品内Timelineをapproved正史にし、その劇中EventをHOUSEの実体験へ自動登録しようとする。"
+    ],
+    "expected": [
+      "許可されない跨ぎ参照・更新・閲覧を拒否し、他Worldの存在や秘密を漏らさない。",
+      "世界ごとにWriter/Store/Canon/権限が隔離される。",
+      "作品内正史を採用しても、HOUSE本人のLive Memoryを自動変更しない。",
+      "明示された型付き出典/Fork参照以外の例外を作らない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "principal/scope別の受付結果",
+      "WorldごとのEvent/State/Memory差分",
+      "Canon採用Receiptとwriteback拒否記録"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-021",
+    "title": "日記・報告の根拠と本人不在blocked",
+    "layer": "runtime_integration",
+    "setup": [
+      "本人の観測Event、COREの実結果Receipt、未観測の他者Eventを含む候補Contextを用意する。",
+      "根拠なしfact、空配列根拠、参照はあるが内容が矛盾するclaimを負fixtureにする。"
+    ],
+    "steps": [
+      "Context builderとgrounding validatorへ正/負fixtureを通す。",
+      "本人Runtimeを利用不能にして日記生成を要求する。",
+      "本人を復帰し、同じ対象期間/Context版/生成方針版で二重要求する。"
+    ],
+    "expected": [
+      "factには内容を支持する許可済み根拠が必要で、単なる参照存在だけで公開しない。",
+      "未観測情報を本人の経験へ混ぜず、feeling/interpretation/wishを事実と区別する。",
+      "本人不在はblockedで、他Agentによる本人代筆を公開しない。",
+      "同じ生成ジョブを重複公開せず、修正は別Revisionとして残す。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "claimと根拠・可視性の検証レポート",
+      "blocked/再開/冪等生成のJob Receipt",
+      "公開Artifact版とhash"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-022",
+    "title": "StoryReleaseの枝参照・Canon範囲・静的/動的Choice",
+    "layer": "runtime_storyplayer",
+    "setup": [
+      "参照World版、Timeline、Snapshot/Event範囲、CHAR版を固定したStoryProjectを用意する。",
+      "正常Package、欠けた枝参照、親の未来Event参照、simulation仮定の本編混入をそれぞれ用意する。"
+    ],
+    "steps": [
+      "Producer/Release Validatorへ正/負Packageを入力する。",
+      "正常Packageの静的Choiceを再生し、Worldの前後差分を調べる。",
+      "動的ChoiceをControllerへ渡し、Command未確定・拒否・確定の各応答を注入する。"
+    ],
+    "expected": [
+      "欠落参照、許可されない未来/別枝参照、未採用仮定を本編の確定事実にするReleaseを拒否する。",
+      "静的Choiceは同Packageの表出だけを選び、WORLDへ書き込まない。",
+      "動的Choiceは認可済みCommandの確定結果を待ち、画面だけで成功を確定しない。",
+      "草案・作品正史・生活Memoryへの還流範囲を保持する。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "Package参照manifestとRelease検証結果",
+      "ChoiceReceipt/Command Receipt/表出の対応trace",
+      "再生前後のWorld/Canon/Memory差分"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-023",
+    "title": "同一ブラウザMain/PinPの発話・音声重複防止",
+    "layer": "runtime_browser",
+    "setup": [
+      "同一pageにLCP/Mainと仕事場/PinPを置き、一つのWorldViewModelと音声Coordinatorを接続する。",
+      "同じutterance_id/presentation_revisionをSnapshot、SSE、再送へ含める。"
+    ],
+    "steps": [
+      "発話を受信し、再送と再接続を行いながらMain/PinPを複数回交換する。",
+      "音声再生失敗を注入し、世界側の発話Eventを確認する。",
+      "明示された新上演Sessionで別の発話識別子を再生する。"
+    ],
+    "expected": [
+      "同一発話の音声再生開始は同じSession内で1回だけになる。",
+      "交換・再送でTask/生活選択/発話生成を二重起動しない。",
+      "音声失敗から発話事実を取消さず、新上演の正規発話は誤って抑制しない。",
+      "この結果を複数端末全体の一回再生保証へ拡張しない。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "audio play開始回数とUtterance対応表",
+      "page内Store/Coordinator/Task起動trace",
+      "Main/PinP交換のブラウザ動画"
+    ],
+    "status": "not_run",
+    "evidence": null
+  },
+  {
+    "id": "W14-AC-024",
+    "title": "HOUSEの8住人・Visitor・二視点・美術と長時間E2E",
+    "layer": "runtime_e2e",
+    "setup": [
+      "実測SpatialBundle、参考4画像、8住人とLumina素材、対象PC/スマホ横の環境を準備する。",
+      "素材不足や未測量の場合は該当Gateを未実施とし、logical検証だけを全体合格へ読み替えない。"
+    ],
+    "steps": [
+      "8住人を表示し、認可済みVisitorの入場/退出を実行する。会話Provider未接続ケースも試す。",
+      "同じ1FでLCP正面から約45度仕事場へ連続遷移し、Main/PinPを交換する。",
+      "階段、単席、机、視線、Actor不在の仕事場、private表示を検査する。",
+      "既存Chat/IdleChat/Gamesを回帰し、24時間稼働で再接続・停止復旧・CPU/GPU/Memory/DB量を計測する。",
+      "参考画像と同条件の完成画面を比較し、美術受入の判断と根拠を残す。"
+    ],
+    "expected": [
+      "常住8、訪問中最大9、退出後8を保ち、Provider不在でLumina本人の発話を捏造しない。",
+      "二視点が同じ位置を表し、ワープ・複製・家具めり込み・過剰スクロールがない。",
+      "論理/物理/美術Gateを区別し、Blender仮レンダを理由なく完成画面へ採用しない。",
+      "既存3モードの回帰と運用証拠を残す。性能閾値は対象機と測定条件を伴う事前定義に従う。"
+    ],
+    "evidence_required": [
+      "試験manifest（source revision、binary hash、fixture/hash、設定版、実行環境、時計条件）",
+      "Spatial/Visual asset revision/hashと測量記録",
+      "PC/スマホの画面・動画・美術採否Receipt",
+      "24時間の運用計測、障害復旧ログ、旧3モード回帰結果"
+    ],
+    "status": "not_run",
+    "evidence": null
+  }
+]
