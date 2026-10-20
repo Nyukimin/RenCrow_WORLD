@@ -40,6 +40,7 @@ var (
 	ErrInvalidCommand      = errors.New("invalid command")
 	ErrSeqOutOfRange       = errors.New("sequence is beyond the timeline")
 	ErrTimelineExists      = errors.New("timeline scope already exists")
+	ErrReceiptNotFound     = errors.New("receipt not found")
 )
 
 // transactionHook is the crash-injection seam used only by the package tests.
@@ -48,10 +49,14 @@ var transactionHook func(point string)
 
 // Scope is the exact WorldID, TimelineID, and TimelineEpoch of every record.
 type Scope struct {
-	WorldID       string
-	TimelineID    string
-	TimelineEpoch string
+	WorldID       string `json:"world_id"`
+	TimelineID    string `json:"timeline_id"`
+	TimelineEpoch string `json:"timeline_epoch"`
 }
+
+// Valid reports whether every scope field is an exact, non-empty UTF-8 value
+// with no surrounding whitespace.
+func (s Scope) Valid() bool { return s.valid() }
 
 func (s Scope) valid() bool {
 	for _, v := range []string{s.WorldID, s.TimelineID, s.TimelineEpoch} {
@@ -451,6 +456,62 @@ func (s *Store) Snapshot(scope Scope) (State, uint64, string, error) {
 		return State{}, 0, "", err
 	}
 	return state, seq, hash, nil
+}
+
+// GetReceipt returns one Receipt by its owner-issued ID inside the scope.
+func (s *Store) GetReceipt(scope Scope, receiptID string) (Receipt, error) {
+	if !scope.valid() || receiptID == "" {
+		return Receipt{}, ErrInvalidCommand
+	}
+	ctx := context.Background()
+	var r Receipt
+	var eventIDs, recorded string
+	var first, last, stateSeq sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT receipt_id, status, reason, txn_id, event_ids, first_seq, last_seq, state_seq, digest, recorded_at
+		FROM receipt WHERE receipt_id = ? AND world_id = ? AND timeline_id = ? AND timeline_epoch = ?`,
+		receiptID, scope.WorldID, scope.TimelineID, scope.TimelineEpoch).
+		Scan(&r.ID, &r.Status, &r.Reason, &r.TransactionID, &eventIDs, &first, &last, &stateSeq, &r.BodyDigest, &recorded)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Receipt{}, ErrReceiptNotFound
+	}
+	if err != nil {
+		return Receipt{}, err
+	}
+	if err := json.Unmarshal([]byte(eventIDs), &r.EventIDs); err != nil {
+		return Receipt{}, err
+	}
+	r.FirstSeq = uint64(first.Int64)
+	r.LastSeq = uint64(last.Int64)
+	r.StateSeq = uint64(stateSeq.Int64)
+	r.RecordedAt, _ = time.Parse(time.RFC3339Nano, recorded)
+	return r, nil
+}
+
+// IsTransactionBoundary reports whether seq is 0 or the last Event sequence of a
+// committed transaction. A stream cursor must be a boundary so a page never
+// exposes half a transaction.
+func (s *Store) IsTransactionBoundary(scope Scope, seq uint64) (bool, error) {
+	if !scope.valid() {
+		return false, ErrInvalidCommand
+	}
+	ctx := context.Background()
+	if _, _, _, err := readTimeline(ctx, s.db, scope); err != nil {
+		return false, err
+	}
+	if seq == 0 {
+		return true, nil
+	}
+	var one int
+	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM txn
+		WHERE world_id = ? AND timeline_id = ? AND timeline_epoch = ? AND last_seq = ?`,
+		scope.WorldID, scope.TimelineID, scope.TimelineEpoch, seq).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) Replay(scope Scope, uptoSeq uint64) (State, string, uint64, error) {

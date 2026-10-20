@@ -12,7 +12,7 @@ import (
 	"github.com/Nyukimin/RenCrow_WORLD/internal/world"
 )
 
-const usage = "usage: rencrow-world inspect --config PATH --world-id ID --at RFC3339Nano"
+const usage = "usage: rencrow-world inspect --config PATH --world-id ID --at RFC3339Nano | rencrow-world serve --config PATH"
 
 type inspectOptions struct {
 	configPath string
@@ -36,6 +36,9 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "serve" {
+		return runServe(args[1:], stdout, stderr)
+	}
 	options, ok := parseArgs(args)
 	if !ok {
 		writeError(stderr, usage)

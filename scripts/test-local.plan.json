@@ -10,7 +10,10 @@
         "cmd/rencrow-world/main_test.go",
         "internal/input/input_test.go",
         "internal/world/bootstrap_isolation_test.go",
-        "internal/world/world_test.go"
+        "internal/world/world_test.go",
+        "internal/store/store_test.go",
+        "internal/store/e2e_test.go",
+        "internal/httpapi/httpapi_test.go"
       ],
       "tier": "fast",
       "impact": {
