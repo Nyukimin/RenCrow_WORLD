@@ -1,0 +1,217 @@
+package store
+
+import (
+	"encoding/json"
+	"errors"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+var projectionAt = time.Date(2026, 10, 20, 2, 3, 4, 0, time.UTC)
+
+func testProjection(scope Scope, actor, instance, kind, epoch string, revision uint64, payload string) Projection {
+	if payload == "" {
+		payload = `{"value":"` + epoch + `-` + string(rune('0'+revision%10)) + `"}`
+	}
+	return Projection{
+		Scope:           scope,
+		ActorID:         actor,
+		ActorInstanceID: instance,
+		Kind:            kind,
+		SourceEpoch:     epoch,
+		SourceRevision:  revision,
+		Payload:         json.RawMessage(payload),
+		ReceivedAt:      projectionAt.Add(time.Duration(revision) * time.Second),
+	}
+}
+
+func bindTestProjectionActors(t *testing.T, s *Store, scope Scope) {
+	t.Helper()
+	for actor, instance := range map[string]string{"mio": "core-instance-mio", "shiro": "core-instance-shiro"} {
+		if err := s.BindProjectionActor(scope, actor, instance, projectionAt); err != nil {
+			t.Fatalf("bind %s: %v", actor, err)
+		}
+	}
+}
+
+func applyProjection(t *testing.T, s *Store, p Projection) ProjectionAck {
+	t.Helper()
+	ack, err := s.ApplyProjection(p)
+	if err != nil {
+		t.Fatalf("ApplyProjection: %v", err)
+	}
+	return ack
+}
+
+func TestProjectionOrderingIsScopedAndIdempotent(t *testing.T) {
+	s, scope := openTestStore(t)
+	bindTestProjectionActors(t, s, scope)
+
+	first := testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 10, `{"task":"a"}`)
+	if ack := applyProjection(t, s, first); ack.Status != ProjectionAccepted {
+		t.Fatalf("first ack = %+v", ack)
+	}
+	if ack := applyProjection(t, s, testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 9, `{"task":"old"}`)); ack.Status != ProjectionStaleRevision {
+		t.Fatalf("stale ack = %+v", ack)
+	}
+	if ack := applyProjection(t, s, first); ack.Status != ProjectionDuplicate {
+		t.Fatalf("duplicate ack = %+v", ack)
+	}
+	if ack := applyProjection(t, s, testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 10, `{"task":"b"}`)); ack.Status != ProjectionRevisionConflict {
+		t.Fatalf("conflict ack = %+v", ack)
+	}
+	if ack := applyProjection(t, s, testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 11, `{"task":"c"}`)); ack.Status != ProjectionAccepted {
+		t.Fatalf("newer ack = %+v", ack)
+	}
+
+	// Actor, projection kind, and source epoch are independent ordering
+	// namespaces. A large revision in one column must not affect another.
+	if ack := applyProjection(t, s, testProjection(scope, "mio", "core-instance-mio", ProjectionKindLifePolicy, "core-epoch-1", 1, `{"policy":"a"}`)); ack.Status != ProjectionAccepted {
+		t.Fatalf("life policy ack = %+v", ack)
+	}
+	if ack := applyProjection(t, s, testProjection(scope, "shiro", "core-instance-shiro", ProjectionKindWorkSet, "core-epoch-1", 1, `{"task":"s"}`)); ack.Status != ProjectionAccepted {
+		t.Fatalf("other actor ack = %+v", ack)
+	}
+	if ack := applyProjection(t, s, testProjection(scope, "shiro", "core-instance-shiro", ProjectionKindWorkSet, "core-epoch-1", 2, `{"task":"s2"}`)); ack.Status != ProjectionAccepted {
+		t.Fatalf("other actor newer ack = %+v", ack)
+	}
+
+	head, err := s.ProjectionHead(scope, "mio", ProjectionKindWorkSet)
+	if err != nil {
+		t.Fatalf("head: %v", err)
+	}
+	if head.SourceRevision != 11 || head.SourceEpoch != "core-epoch-1" || string(head.Payload) != `{"task":"c"}` {
+		t.Fatalf("head = %+v", head)
+	}
+	life, err := s.ProjectionHead(scope, "mio", ProjectionKindLifePolicy)
+	if err != nil || life.SourceRevision != 1 {
+		t.Fatalf("life head = %+v, %v", life, err)
+	}
+}
+
+func TestProjectionPersistsAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "world.db")
+	scope := testScope()
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := s.CreateTimeline(scope, State{}, nil); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	bindTestProjectionActors(t, s, scope)
+	first := testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 4, `{"task":"a"}`)
+	if ack := applyProjection(t, s, first); ack.Status != ProjectionAccepted {
+		t.Fatalf("first = %+v", ack)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	s, err = Open(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer s.Close()
+	if ack := applyProjection(t, s, first); ack.Status != ProjectionDuplicate {
+		t.Fatalf("duplicate after reopen = %+v", ack)
+	}
+	if ack := applyProjection(t, s, testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 5, `{"task":"b"}`)); ack.Status != ProjectionAccepted {
+		t.Fatalf("revision after reopen = %+v", ack)
+	}
+	head, err := s.ProjectionHead(scope, "mio", ProjectionKindWorkSet)
+	if err != nil || head.SourceRevision != 5 {
+		t.Fatalf("head after reopen = %+v, %v", head, err)
+	}
+}
+
+func TestProjectionReconcileSwitchesEpoch(t *testing.T) {
+	s, scope := openTestStore(t)
+	bindTestProjectionActors(t, s, scope)
+	if ack := applyProjection(t, s, testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 5, `{"task":"a"}`)); ack.Status != ProjectionAccepted {
+		t.Fatalf("old epoch = %+v", ack)
+	}
+	if ack := applyProjection(t, s, testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-2", 1, `{"task":"b"}`)); ack.Status != ProjectionEpochRequiresReconcile {
+		t.Fatalf("unapproved new epoch = %+v", ack)
+	}
+
+	reconciled, err := s.ReconcileProjection(testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-2", 1, `{"task":"full"}`))
+	if err != nil {
+		t.Fatalf("ReconcileProjection: %v", err)
+	}
+	if reconciled.Status != ProjectionAccepted {
+		t.Fatalf("reconcile = %+v", reconciled)
+	}
+	if ack := applyProjection(t, s, testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 999, `{"task":"late"}`)); ack.Status != ProjectionEpochSuperseded {
+		t.Fatalf("old epoch after reconcile = %+v", ack)
+	}
+	if ack := applyProjection(t, s, testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-2", 2, `{"task":"next"}`)); ack.Status != ProjectionAccepted {
+		t.Fatalf("new epoch next = %+v", ack)
+	}
+	unchanged, err := s.ReconcileProjection(testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-2", 3, `{"task":"again"}`))
+	if err != nil {
+		t.Fatalf("same epoch reconcile: %v", err)
+	}
+	if unchanged.Status != ProjectionEpochUnchanged {
+		t.Fatalf("same epoch reconcile = %+v", unchanged)
+	}
+}
+
+func TestProjectionRequiresBoundActorMapping(t *testing.T) {
+	s, scope := openTestStore(t)
+	if _, err := s.ApplyProjection(testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 1, `{}`)); !errors.Is(err, ErrProjectionActorUnbound) {
+		t.Fatalf("unbound err = %v", err)
+	}
+	if err := s.BindProjectionActor(scope, "mio", "core-instance-mio", projectionAt); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if err := s.BindProjectionActor(scope, "mio", "core-instance-mio", projectionAt); err != nil {
+		t.Fatalf("idempotent bind: %v", err)
+	}
+	if _, err := s.ApplyProjection(testProjection(scope, "mio", "other-instance", ProjectionKindWorkSet, "core-epoch-1", 1, `{}`)); !errors.Is(err, ErrProjectionActorConflict) {
+		t.Fatalf("wrong instance err = %v", err)
+	}
+	if err := s.BindProjectionActor(scope, "shiro", "core-instance-mio", projectionAt); !errors.Is(err, ErrProjectionActorConflict) {
+		t.Fatalf("duplicate instance bind err = %v", err)
+	}
+	if err := s.BindProjectionActor(scope, "shiro", "core-instance-shiro", projectionAt); err != nil {
+		t.Fatalf("second bind: %v", err)
+	}
+}
+
+func TestProjectionRejectsInvalidInputAndLimits(t *testing.T) {
+	s, scope := openTestStore(t)
+	bindTestProjectionActors(t, s, scope)
+	base := testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 1, `{}`)
+	cases := []Projection{
+		func() Projection { p := base; p.SourceRevision = 0; return p }(),
+		func() Projection { p := base; p.Kind = "memory_dump"; return p }(),
+		func() Projection { p := base; p.SourceEpoch = ""; return p }(),
+		func() Projection { p := base; p.ActorID = ""; return p }(),
+		func() Projection { p := base; p.Payload = json.RawMessage(`[]`); return p }(),
+		func() Projection { p := base; p.Payload = json.RawMessage(`{"x":`); return p }(),
+	}
+	for i, p := range cases {
+		if _, err := s.ApplyProjection(p); !errors.Is(err, ErrInvalidProjection) {
+			t.Fatalf("case %d err = %v", i, err)
+		}
+	}
+	large := base
+	large.Payload = json.RawMessage(`{"x":"` + string(make([]byte, MaxProjectionBytes)) + `"}`)
+	if _, err := s.ApplyProjection(large); !errors.Is(err, ErrLimitExceeded) {
+		t.Fatalf("large err = %v", err)
+	}
+}
+
+func TestProjectionRejectsSupersededTimelineEpoch(t *testing.T) {
+	s, scope := openTestStore(t)
+	bindTestProjectionActors(t, s, scope)
+	if _, err := s.db.Exec(`UPDATE timeline SET superseded_by = 'epoch-2'
+		WHERE world_id = ? AND timeline_id = ? AND timeline_epoch = ?`, scope.WorldID, scope.TimelineID, scope.TimelineEpoch); err != nil {
+		t.Fatalf("supersede: %v", err)
+	}
+	if _, err := s.ApplyProjection(testProjection(scope, "mio", "core-instance-mio", ProjectionKindWorkSet, "core-epoch-1", 1, `{}`)); !errors.Is(err, ErrEpochSuperseded) {
+		t.Fatalf("superseded err = %v", err)
+	}
+}

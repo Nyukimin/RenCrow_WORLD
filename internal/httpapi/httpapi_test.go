@@ -25,6 +25,7 @@ const (
 	writerToken     = "writer-token-value"
 	readerToken     = "reader-token-value"
 	streamerToken   = "streamer-token-value"
+	projectionToken = "projection-token-value"
 	wrongScopeToken = "wrong-scope-token-value"
 )
 
@@ -48,7 +49,12 @@ func baseConfig(t *testing.T, dir string) Config {
 			{ID: "writer", SHA256: tokenHash(writerToken), Scopes: []string{"read", "write", "stream"}},
 			{ID: "reader", SHA256: tokenHash(readerToken), Scopes: []string{"read"}},
 			{ID: "streamer", SHA256: tokenHash(streamerToken), Scopes: []string{"stream"}},
+			{ID: "core", SHA256: tokenHash(projectionToken), Scopes: []string{"projection"}},
 			{ID: "wrong", SHA256: tokenHash(wrongScopeToken), Scopes: []string{"read"}, Scope: &wrong},
+		},
+		CoreProjectionActors: []ProjectionActorConfig{
+			{ActorID: "mio", ActorInstanceID: "core-instance-mio"},
+			{ActorID: "shiro", ActorInstanceID: "core-instance-shiro"},
 		},
 		Page:             PageConfig{MaxEvents: 4, MaxBytes: 1 << 20},
 		SSE:              SSEConfig{HeartbeatSeconds: 30, PollMillis: 20},
@@ -226,6 +232,10 @@ func TestLoadConfigDefaultsAndValidation(t *testing.T) {
 		{"duplicate id", func(c *Config) { c.Tokens[1].ID = c.Tokens[0].ID }},
 		{"bad token scope", func(c *Config) { c.Tokens[0].Scope = &store.Scope{WorldID: "x"} }},
 		{"bad token scope name", func(c *Config) { c.Tokens[0].Scopes = []string{"admin"} }},
+		{"projection without binding", func(c *Config) { c.CoreProjectionActors = nil }},
+		{"duplicate projection actor", func(c *Config) { c.CoreProjectionActors[1].ActorID = c.CoreProjectionActors[0].ActorID }},
+		{"duplicate projection instance", func(c *Config) { c.CoreProjectionActors[1].ActorInstanceID = c.CoreProjectionActors[0].ActorInstanceID }},
+		{"bad projection actor", func(c *Config) { c.CoreProjectionActors[0].ActorID = "" }},
 		{"page too large", func(c *Config) { c.Page.MaxEvents = 501 }},
 		{"poll too small", func(c *Config) { c.SSE.PollMillis = 1 }},
 	}

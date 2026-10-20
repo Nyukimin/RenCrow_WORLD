@@ -80,6 +80,12 @@ func New(cfg Config) (*Server, error) {
 			return nil, err
 		}
 	}
+	for _, binding := range cfg.CoreProjectionActors {
+		if err := st.BindProjectionActor(cfg.Scope, binding.ActorID, binding.ActorInstanceID, nowUTC()); err != nil {
+			_ = st.Close()
+			return nil, err
+		}
+	}
 	if cfg.AllowProbeAction {
 		st.Register("debug.noop", probeHandler)
 	}
@@ -106,6 +112,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/events", s.auth("read", s.handleEvents))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/receipts/{receipt}", s.auth("read", s.handleReceipt))
 	mux.HandleFunc("POST /v1/worlds/{world}/timelines/{timeline}/commands", s.auth("write", s.handleCommand))
+	mux.HandleFunc("PUT /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("projection", s.handleCoreProjection))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/stream", s.auth("stream", s.handleStream))
 	return mux
 }

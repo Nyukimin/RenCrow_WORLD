@@ -254,6 +254,33 @@ func (s *Store) migrate() error {
 			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
 			source_revision TEXT NOT NULL, completed_at TEXT NOT NULL,
 			PRIMARY KEY (world_id, timeline_id, timeline_epoch))`,
+		`CREATE TABLE IF NOT EXISTS projection_actor (
+			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, actor_id TEXT NOT NULL,
+			actor_instance_id TEXT NOT NULL, bound_at TEXT NOT NULL,
+			PRIMARY KEY (world_id, timeline_id, actor_id),
+			UNIQUE (world_id, timeline_id, actor_instance_id))`,
+		`CREATE TABLE IF NOT EXISTS projection_head (
+			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
+			actor_id TEXT NOT NULL, actor_instance_id TEXT NOT NULL, projection_kind TEXT NOT NULL,
+			source_epoch TEXT NOT NULL, source_revision INTEGER NOT NULL, digest TEXT NOT NULL,
+			payload BLOB NOT NULL, accepted_at TEXT NOT NULL,
+			PRIMARY KEY (world_id, timeline_id, timeline_epoch, actor_id, projection_kind))`,
+		`CREATE TABLE IF NOT EXISTS projection_epoch_history (
+			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
+			actor_id TEXT NOT NULL, projection_kind TEXT NOT NULL, source_epoch TEXT NOT NULL,
+			retired_at TEXT NOT NULL,
+			PRIMARY KEY (world_id, timeline_id, timeline_epoch, actor_id, projection_kind, source_epoch))`,
+		`CREATE TABLE IF NOT EXISTS projection_reconcile (
+			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
+			actor_id TEXT NOT NULL, projection_kind TEXT NOT NULL,
+			previous_epoch TEXT NOT NULL, current_epoch TEXT NOT NULL,
+			source_revision INTEGER NOT NULL, digest TEXT NOT NULL, reconciled_at TEXT NOT NULL)`,
+		`CREATE TABLE IF NOT EXISTS projection_ack (
+			ack_id TEXT PRIMARY KEY,
+			world_id TEXT NOT NULL, timeline_id TEXT NOT NULL, timeline_epoch TEXT NOT NULL,
+			actor_id TEXT NOT NULL, actor_instance_id TEXT NOT NULL, projection_kind TEXT NOT NULL,
+			source_epoch TEXT NOT NULL, source_revision INTEGER NOT NULL, digest TEXT NOT NULL,
+			status TEXT NOT NULL, reason TEXT NOT NULL, recorded_at TEXT NOT NULL)`,
 	}
 	for _, stmt := range stmts {
 		if _, err := s.db.Exec(stmt); err != nil {

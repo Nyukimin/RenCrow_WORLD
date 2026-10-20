@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Nyukimin/RenCrow_WORLD/internal/store"
 )
@@ -19,9 +20,10 @@ const (
 )
 
 var validScopes = map[string]bool{
-	"read":   true,
-	"write":  true,
-	"stream": true,
+	"read":       true,
+	"write":      true,
+	"stream":     true,
+	"projection": true,
 }
 
 // Config is the explicit R07 source configuration. There is no default route,
@@ -36,6 +38,17 @@ type Config struct {
 	AllowProbeAction bool                `json:"allow_probe_action"`
 	AllowRemote      bool                `json:"allow_remote"`
 	InitialState     *InitialStateConfig `json:"initial_state,omitempty"`
+	// CoreProjectionActors is the operator-authorized ActorID to
+	// ActorInstanceID mapping. CORE projection payloads cannot establish or
+	// change this mapping.
+	CoreProjectionActors []ProjectionActorConfig `json:"core_projection_actors,omitempty"`
+}
+
+// ProjectionActorConfig binds one canonical ActorID to the CORE instance that
+// is allowed to publish its WorkSet and LifePolicy projections.
+type ProjectionActorConfig struct {
+	ActorID         string `json:"actor_id"`
+	ActorInstanceID string `json:"actor_instance_id"`
 }
 
 // TokenConfig stores only a SHA-256 digest of a bearer token. The raw token is
@@ -159,6 +172,32 @@ func NormalizeConfig(cfg Config) (Config, error) {
 			return Config{}, fmt.Errorf("token %q has an invalid bound scope", t.ID)
 		}
 	}
+	needsProjectionBinding := false
+	for _, t := range cfg.Tokens {
+		for _, s := range t.Scopes {
+			if s == "projection" {
+				needsProjectionBinding = true
+			}
+		}
+	}
+	seenActors := map[string]bool{}
+	seenInstances := map[string]bool{}
+	for i, b := range cfg.CoreProjectionActors {
+		if !validConfigExact(b.ActorID, 256) || !validConfigExact(b.ActorInstanceID, 256) {
+			return Config{}, fmt.Errorf("core_projection_actors[%d] requires exact actor_id and actor_instance_id", i)
+		}
+		if seenActors[b.ActorID] {
+			return Config{}, fmt.Errorf("core_projection_actors repeats actor_id %q", b.ActorID)
+		}
+		if seenInstances[b.ActorInstanceID] {
+			return Config{}, fmt.Errorf("core_projection_actors repeats actor_instance_id %q", b.ActorInstanceID)
+		}
+		seenActors[b.ActorID] = true
+		seenInstances[b.ActorInstanceID] = true
+	}
+	if needsProjectionBinding && len(cfg.CoreProjectionActors) == 0 {
+		return Config{}, errors.New("a projection token requires at least one core_projection_actors binding")
+	}
 	if cfg.Page.MaxEvents == 0 {
 		cfg.Page.MaxEvents = store.DefaultPageEvents
 	}
@@ -216,4 +255,9 @@ func hasControl(s string) bool {
 		}
 	}
 	return false
+}
+
+func validConfigExact(value string, max int) bool {
+	return value != "" && len(value) <= max && utf8.ValidString(value) &&
+		strings.TrimSpace(value) == value && !hasControl(value)
 }
