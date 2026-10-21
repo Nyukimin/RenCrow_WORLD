@@ -116,6 +116,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/snapshot", s.auth("read", s.handleSnapshot))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/events", s.auth("read", s.handleEvents))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/receipts/{receipt}", s.auth("read", s.handleReceipt))
+	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/actors/{actor}/assessment", s.auth("read", s.handleAssessment))
 	mux.HandleFunc("POST /v1/worlds/{world}/timelines/{timeline}/commands", s.auth("write", s.handleCommand))
 	mux.HandleFunc("PUT /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("", s.handleCoreProjection))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("", s.handleProjectionHead))

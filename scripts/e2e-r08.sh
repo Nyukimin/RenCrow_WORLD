@@ -246,6 +246,19 @@ CODE="$(put_projection "$PROJECTION_PATH/mio/life_policy" "$LP1" "$TMP/ack.json"
 [ "$CODE" = "200" ]
 [ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "accepted" ]
 
+echo "== assessment consumes registered catalog and heads =="
+ASSESS_URL="$BASE$SCOPE_PATH/actors/mio/assessment"
+ASSESS="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$ASSESS_URL")"
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_set_state"]')" = "assigned" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["policy_state"]')" = "fresh" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["new_activity_allowed"]')" = "True" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_success"]')" = "False" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["kind"]')" = "queued" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["permitted_activity_ids"]')" = "['rest', 'walk']" ]
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/actors/kuro/assessment")" = "403" ]
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CORE_TOKEN" "$ASSESS_URL")" = "403" ]
+[ "$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/snapshot" | json_get 'v["state_seq"]')" = "0" ]
+
 echo "== invalid and unauthorized =="
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS_BAD" "$TMP/ack.json")"
 [ "$CODE" = "400" ]
@@ -271,6 +284,11 @@ make_work_set "$WS11" core-epoch-1 14 running
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS11" "$TMP/ack.json")"
 [ "$CODE" = "200" ]
 [ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "accepted" ]
+ASSESS="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/actors/mio/assessment")"
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_set_state"]')" = "assigned" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["kind"]')" = "presence" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["presence_task_ids"]')" = "['task-1']" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["running_task_ids"]')" = "['task-1']" ]
 
 echo "== epoch reconciliation =="
 WS_E2="$(host_path "$TMP/ws-e2.json")"
