@@ -142,7 +142,7 @@ body = {
         "source_owner": "CORE",
         "source_epoch": epoch,
         "source_revision": rev,
-        "valid_until": "2026-10-21T00:00:00Z",
+        "valid_until": "2099-01-01T00:00:00Z",
         "active_work": work,
     },
 }
@@ -170,7 +170,7 @@ body = {
         "source_owner": "CORE",
         "source_epoch": epoch,
         "source_revision": rev,
-        "valid_until": "2026-10-21T00:00:00Z",
+        "valid_until": "2099-01-01T00:00:00Z",
         "persona_revision": "persona-1",
         "allowed_non_cognitive_activity_ids": ["walk", "rest"],
         "expired_fallback_activity_ids": ["rest"],
