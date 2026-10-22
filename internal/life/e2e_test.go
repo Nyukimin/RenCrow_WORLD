@@ -76,7 +76,7 @@ func TestE2EProjectionToLifeAssessment(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse policy: %v", err)
 		}
-		got, err := life.Assess(&work, &policy, now, life.StaticCatalog{"walk": true, "rest": true})
+		got, err := life.Assess(&work, &policy, now, life.DefaultCatalog())
 		if err != nil {
 			t.Fatalf("assess: %v", err)
 		}
@@ -87,6 +87,29 @@ func TestE2EProjectionToLifeAssessment(t *testing.T) {
 	if got.WorkSetState != life.WorkSetAssigned || got.WorkPresentation.Kind != life.WorkPresence ||
 		got.PolicyState != life.PolicyFresh || !got.NewActivityAllowed {
 		t.Fatalf("fresh assessment = %+v", got)
+	}
+
+	// WORLD's owner mapping is the candidate source for these real heads.
+	// Presence-required running work keeps the Actor in place, so neither of the
+	// two permitted activities is offered or admitted, and a life activity the
+	// fresh policy does not name stops through its own rule without releasing
+	// the physical resource it holds.
+	definitions := life.DefaultActivityDefinitions()
+	if candidates, err := life.ExecutableActivityIDs(got, definitions); err != nil {
+		t.Fatalf("executable ids: %v", err)
+	} else if len(candidates) != 0 {
+		t.Fatalf("presence work offered candidates: %v", candidates)
+	}
+	if admitted, err := life.AdmitCandidate(got, ownerActivity(t, definitions, "walk")); err != nil {
+		t.Fatalf("admit walk: %v", err)
+	} else if admitted.Allowed || admitted.Reason != "presence_required" {
+		t.Fatalf("walk admission = %+v", admitted)
+	}
+	if plan, err := life.PlanContinuation(got, ownerActivity(t, definitions, "sit")); err != nil {
+		t.Fatalf("continue sit: %v", err)
+	} else if plan.Action != life.ContinuationStop || plan.Reason != "activity_not_permitted" ||
+		!plan.Stop.Allowed || plan.Stop.ReleaseOccupancy {
+		t.Fatalf("revoked sit plan = %+v", plan)
 	}
 
 	expiredPolicy := json.RawMessage(`{
@@ -100,6 +123,20 @@ func TestE2EProjectionToLifeAssessment(t *testing.T) {
 	if got.PolicyState != life.PolicyExpired || !got.NewActivityAllowed ||
 		len(got.PermittedActivityIDs) != 1 || got.PermittedActivityIDs[0] != "rest" {
 		t.Fatalf("expired assessment = %+v", got)
+	}
+
+	// The expired fallback keeps only `rest`, which still needs movement, so
+	// presence work keeps offering nothing while the fallback activity that is
+	// already permitted keeps running.
+	if candidates, err := life.ExecutableActivityIDs(got, definitions); err != nil {
+		t.Fatalf("expired executable ids: %v", err)
+	} else if len(candidates) != 0 {
+		t.Fatalf("expired fallback offered candidates during presence work: %v", candidates)
+	}
+	if plan, err := life.PlanContinuation(got, ownerActivity(t, definitions, "rest")); err != nil {
+		t.Fatalf("continue rest: %v", err)
+	} else if plan.Action != life.ContinuationContinue || plan.Reason != "policy_expired_fallback" {
+		t.Fatalf("fallback plan = %+v", plan)
 	}
 
 	plan := life.PlanStop(life.RunningActivity{
@@ -117,4 +154,17 @@ func TestE2EProjectionToLifeAssessment(t *testing.T) {
 	if seq != 0 {
 		t.Fatalf("projection evaluation changed state_seq to %d", seq)
 	}
+}
+
+// ownerActivity selects one entry of WORLD's owner mapping and fails when the
+// mapping does not name it, so the evidence cannot pass on a missing activity.
+func ownerActivity(t *testing.T, definitions []life.RunningActivity, id string) life.RunningActivity {
+	t.Helper()
+	for _, definition := range definitions {
+		if definition.ID == id {
+			return definition
+		}
+	}
+	t.Fatalf("owner activity mapping has no %q", id)
+	return life.RunningActivity{}
 }
