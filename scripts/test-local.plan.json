@@ -22,6 +22,7 @@
         "internal/life/catalog_test.go",
         "internal/life/e2e_test.go",
         "internal/life/plan_test.go",
+        "internal/life/provisional_space_test.go",
         "internal/life/terminate_test.go",
         "internal/projection/envelope_test.go",
         "internal/store/projection_reconcile_test.go",
