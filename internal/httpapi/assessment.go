@@ -13,19 +13,20 @@ import (
 )
 
 type assessmentBody struct {
-	SchemaVersion        int                            `json:"schema_version"`
-	WorldID              string                         `json:"world_id"`
-	TimelineID           string                         `json:"timeline_id"`
-	TimelineEpoch        string                         `json:"timeline_epoch"`
-	ActorID              string                         `json:"actor_id"`
-	AssessedAt           time.Time                      `json:"assessed_at"`
-	WorkSetState         string                         `json:"work_set_state"`
-	PolicyState          string                         `json:"policy_state"`
-	WorkPresentation     assessmentWorkPresentationBody `json:"work_presentation"`
-	PermittedActivityIDs []string                       `json:"permitted_activity_ids"`
-	NewActivityAllowed   bool                           `json:"new_activity_allowed"`
-	BlockedReason        string                         `json:"blocked_reason,omitempty"`
-	WorkSuccess          bool                           `json:"work_success"`
+	SchemaVersion         int                            `json:"schema_version"`
+	WorldID               string                         `json:"world_id"`
+	TimelineID            string                         `json:"timeline_id"`
+	TimelineEpoch         string                         `json:"timeline_epoch"`
+	ActorID               string                         `json:"actor_id"`
+	AssessedAt            time.Time                      `json:"assessed_at"`
+	WorkSetState          string                         `json:"work_set_state"`
+	PolicyState           string                         `json:"policy_state"`
+	WorkPresentation      assessmentWorkPresentationBody `json:"work_presentation"`
+	PermittedActivityIDs  []string                       `json:"permitted_activity_ids"`
+	ExecutableActivityIDs []string                       `json:"executable_activity_ids"`
+	NewActivityAllowed    bool                           `json:"new_activity_allowed"`
+	BlockedReason         string                         `json:"blocked_reason,omitempty"`
+	WorkSuccess           bool                           `json:"work_success"`
 }
 
 type assessmentWorkPresentationBody struct {
@@ -37,6 +38,10 @@ type assessmentWorkPresentationBody struct {
 // handleAssessment exposes the R09 meaning layer for one operator-authorized
 // CORE Actor. It is a read-only projection of the accepted WorkSet/LifePolicy
 // heads: it does not select an activity, move an Actor, or write WORLD State.
+// The published executable set is the WORLD owner mapping filtered by the
+// current policy and presence rule (D-11); selection still belongs to the
+// single life controller, and nothing here claims a location, reservation, or
+// measured geometry (D-17/D-18).
 func (s *Server) handleAssessment(w http.ResponseWriter, r *http.Request) {
 	actorID, err := idmap.Decode(r.PathValue("actor"))
 	if err != nil || actorID == "" {
@@ -77,6 +82,14 @@ func (s *Server) handleAssessment(w http.ResponseWriter, r *http.Request) {
 	if permitted == nil {
 		permitted = []string{}
 	}
+	executable, err := life.ExecutableActivityIDs(assessment, life.DefaultActivityDefinitions())
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, "assessment_unavailable", "the life assessment is unavailable")
+		return
+	}
+	if executable == nil {
+		executable = []string{}
+	}
 	sort.Strings(permitted)
 	presence := append([]string(nil), assessment.WorkPresentation.PresenceTaskIDs...)
 	if presence == nil {
@@ -100,10 +113,11 @@ func (s *Server) handleAssessment(w http.ResponseWriter, r *http.Request) {
 			PresenceTaskIDs: presence,
 			RunningTaskIDs:  running,
 		},
-		PermittedActivityIDs: permitted,
-		NewActivityAllowed:   assessment.NewActivityAllowed,
-		BlockedReason:        assessment.BlockedReason,
-		WorkSuccess:          assessment.WorkSuccess,
+		PermittedActivityIDs:  permitted,
+		ExecutableActivityIDs: executable,
+		NewActivityAllowed:    assessment.NewActivityAllowed,
+		BlockedReason:         assessment.BlockedReason,
+		WorkSuccess:           assessment.WorkSuccess,
 	})
 }
 

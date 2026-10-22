@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Nyukimin/RenCrow_WORLD/internal/idmap"
+	"github.com/Nyukimin/RenCrow_WORLD/internal/life"
 	"github.com/Nyukimin/RenCrow_WORLD/internal/projection"
 )
 
@@ -63,6 +64,9 @@ func TestAssessmentReturnsMissingHeadsWithoutProjection(t *testing.T) {
 	}
 	if ids, ok := body["permitted_activity_ids"].([]any); !ok || len(ids) != 0 {
 		t.Fatalf("permitted_activity_ids = %v", body["permitted_activity_ids"])
+	}
+	if ids, ok := body["executable_activity_ids"].([]any); !ok || len(ids) != 0 {
+		t.Fatalf("executable_activity_ids = %v", body["executable_activity_ids"])
 	}
 	if _, err := time.Parse(time.RFC3339Nano, body["assessed_at"].(string)); err != nil {
 		t.Fatalf("assessed_at = %v: %v", body["assessed_at"], err)
@@ -121,6 +125,77 @@ func TestAssessmentExpiredPolicyUsesRegisteredFallback(t *testing.T) {
 	assertStringSet(t, body["permitted_activity_ids"], []string{"rest"})
 	if body["new_activity_allowed"] != true || body["work_success"] != false {
 		t.Fatalf("permission/success = %v", body)
+	}
+}
+
+// TestAssessmentPublishesExecutableActivityCandidates publishes, from WORLD's
+// owner activity mapping, the candidates a controller may plan now. An activity
+// without a definition is never published, presence-required work keeps the
+// Actor in place, and an expired WorkSet is unknown rather than a presence
+// requirement. The route stays read-only and selects nothing.
+func TestAssessmentPublishesExecutableActivityCandidates(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	applyAssessmentProjection(t, ts, projection.KindWorkSet, 1, workSetPayloadAt(future, []any{}))
+	applyAssessmentProjection(t, ts, projection.KindLifePolicy, 1, lifePolicyPayloadAt(future, []string{"walk", "read", "idle"}, []string{}))
+
+	body := getAssessment(t, ts, "mio")
+	assertStringSet(t, body["permitted_activity_ids"], []string{"idle", "read", "walk"})
+	assertStringSet(t, body["executable_activity_ids"], []string{"idle", "read", "walk"})
+
+	presence := []any{map[string]any{
+		"task_id": "task-1", "run_id": "run-1", "execution_state": "running",
+		"work_class": "assigned_work", "requires_house_presence": true,
+		"classification_reason_code": "assigned",
+	}}
+	applyAssessmentProjection(t, ts, projection.KindWorkSet, 2, workSetPayloadAt(future, presence))
+	body = getAssessment(t, ts, "mio")
+	if kind := body["work_presentation"].(map[string]any)["kind"]; kind != "presence" {
+		t.Fatalf("presentation kind = %v", kind)
+	}
+	assertStringSet(t, body["permitted_activity_ids"], []string{"idle", "read", "walk"})
+	assertStringSet(t, body["executable_activity_ids"], []string{"idle"})
+
+	// Unknown work must not remove the permitted non-cognitive options.
+	applyAssessmentProjection(t, ts, projection.KindWorkSet, 3, workSetPayloadAt(past, presence))
+	body = getAssessment(t, ts, "mio")
+	if body["work_set_state"] != "expired" {
+		t.Fatalf("work_set_state = %v", body["work_set_state"])
+	}
+	assertStringSet(t, body["executable_activity_ids"], []string{"idle", "read", "walk"})
+}
+
+// TestAssessmentPublishedCandidatesAreDefinedAndPermitted keeps the published
+// set inside WORLD's owner mapping and inside the current policy, including the
+// expired-policy fallback.
+func TestAssessmentPublishedCandidatesAreDefinedAndPermitted(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	past := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+	applyAssessmentProjection(t, ts, projection.KindLifePolicy, 1, lifePolicyPayloadAt(past, []string{"walk", "rest"}, []string{"rest"}))
+
+	body := getAssessment(t, ts, "mio")
+	if body["policy_state"] != "expired" {
+		t.Fatalf("policy_state = %v", body["policy_state"])
+	}
+	assertStringSet(t, body["executable_activity_ids"], []string{"rest"})
+
+	defined := map[string]bool{}
+	for _, definition := range life.DefaultActivityDefinitions() {
+		defined[definition.ID] = true
+	}
+	permitted := map[string]bool{}
+	for _, id := range body["permitted_activity_ids"].([]any) {
+		permitted[id.(string)] = true
+	}
+	for _, value := range body["executable_activity_ids"].([]any) {
+		id, _ := value.(string)
+		if !defined[id] {
+			t.Fatalf("published an activity without a definition: %v", id)
+		}
+		if !permitted[id] {
+			t.Fatalf("published an activity the policy does not permit: %v", id)
+		}
 	}
 }
 
