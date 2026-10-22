@@ -255,6 +255,9 @@ ASSESS="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$ASSESS_URL")"
 [ "$(printf '%s' "$ASSESS" | json_get 'v["work_success"]')" = "False" ]
 [ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["kind"]')" = "queued" ]
 [ "$(printf '%s' "$ASSESS" | json_get 'v["permitted_activity_ids"]')" = "['rest', 'walk']" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["queued_task_ids"]')" = "['task-2']" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["waiting_task_ids"]')" = "[]" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["executable_activity_ids"]')" = "['rest', 'walk']" ]
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/actors/kuro/assessment")" = "403" ]
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CORE_TOKEN" "$ASSESS_URL")" = "403" ]
 [ "$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/snapshot" | json_get 'v["state_seq"]')" = "0" ]
@@ -289,6 +292,9 @@ ASSESS="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/acto
 [ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["kind"]')" = "presence" ]
 [ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["presence_task_ids"]')" = "['task-1']" ]
 [ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["running_task_ids"]')" = "['task-1']" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["queued_task_ids"]')" = "[]" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["waiting_task_ids"]')" = "[]" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v["executable_activity_ids"]')" = "[]" ]
 
 echo "== epoch reconciliation =="
 WS_E2="$(host_path "$TMP/ws-e2.json")"

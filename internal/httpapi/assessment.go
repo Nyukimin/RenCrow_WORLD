@@ -33,6 +33,8 @@ type assessmentWorkPresentationBody struct {
 	Kind            string   `json:"kind"`
 	PresenceTaskIDs []string `json:"presence_task_ids"`
 	RunningTaskIDs  []string `json:"running_task_ids"`
+	QueuedTaskIDs   []string `json:"queued_task_ids"`
+	WaitingTaskIDs  []string `json:"waiting_task_ids"`
 }
 
 // handleAssessment exposes the R09 meaning layer for one operator-authorized
@@ -99,6 +101,14 @@ func (s *Server) handleAssessment(w http.ResponseWriter, r *http.Request) {
 	if running == nil {
 		running = []string{}
 	}
+	queued := append([]string(nil), assessment.WorkPresentation.QueuedTaskIDs...)
+	if queued == nil {
+		queued = []string{}
+	}
+	waiting := append([]string(nil), assessment.WorkPresentation.WaitingTaskIDs...)
+	if waiting == nil {
+		waiting = []string{}
+	}
 	writeJSON(w, http.StatusOK, assessmentBody{
 		SchemaVersion: SchemaVersion,
 		WorldID:       s.cfg.Scope.WorldID,
@@ -112,6 +122,8 @@ func (s *Server) handleAssessment(w http.ResponseWriter, r *http.Request) {
 			Kind:            string(assessment.WorkPresentation.Kind),
 			PresenceTaskIDs: presence,
 			RunningTaskIDs:  running,
+			QueuedTaskIDs:   queued,
+			WaitingTaskIDs:  waiting,
 		},
 		PermittedActivityIDs:  permitted,
 		ExecutableActivityIDs: executable,

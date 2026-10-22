@@ -51,6 +51,12 @@ type WorkPresentation struct {
 	Kind            WorkPresentationKind
 	PresenceTaskIDs []string
 	RunningTaskIDs  []string
+	// QueuedTaskIDs and WaitingTaskIDs publish the D-13 states a consumer must
+	// not turn into movement: queued work alone never moves the Actor to a
+	// workplace, and waiting/blocked work starts nothing new. They are planning
+	// input only and claim no place, reservation, or measured geometry.
+	QueuedTaskIDs  []string
+	WaitingTaskIDs []string
 }
 
 type Assessment struct {
@@ -145,7 +151,10 @@ func assessWorkPresentation(workSet *projection.WorkSet, now time.Time) WorkPres
 			if item.RequiresHousePresence {
 				result.PresenceTaskIDs = append(result.PresenceTaskIDs, item.TaskID)
 			}
+		case "queued":
+			result.QueuedTaskIDs = append(result.QueuedTaskIDs, item.TaskID)
 		case "waiting", "blocked":
+			result.WaitingTaskIDs = append(result.WaitingTaskIDs, item.TaskID)
 			if result.Kind == WorkQueued {
 				result.Kind = WorkWaiting
 			}

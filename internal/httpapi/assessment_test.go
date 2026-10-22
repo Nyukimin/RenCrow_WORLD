@@ -62,6 +62,12 @@ func TestAssessmentReturnsMissingHeadsWithoutProjection(t *testing.T) {
 		len(presentation["running_task_ids"].([]any)) != 0 {
 		t.Fatalf("presentation = %v", presentation)
 	}
+	if ids, ok := presentation["queued_task_ids"].([]any); !ok || len(ids) != 0 {
+		t.Fatalf("queued_task_ids = %v", presentation["queued_task_ids"])
+	}
+	if ids, ok := presentation["waiting_task_ids"].([]any); !ok || len(ids) != 0 {
+		t.Fatalf("waiting_task_ids = %v", presentation["waiting_task_ids"])
+	}
 	if ids, ok := body["permitted_activity_ids"].([]any); !ok || len(ids) != 0 {
 		t.Fatalf("permitted_activity_ids = %v", body["permitted_activity_ids"])
 	}
@@ -127,6 +133,53 @@ func TestAssessmentExpiredPolicyUsesRegisteredFallback(t *testing.T) {
 		t.Fatalf("permission/success = %v", body)
 	}
 }
+
+func TestAssessmentPublishesQueuedAndWaitingTasks(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	work := []any{
+		workItem("task-q", "queued", boolPtr(false)),
+		workItem("task-w", "waiting", boolPtr(true)),
+		workItem("task-r", "running", boolPtr(true)),
+	}
+	applyAssessmentProjection(t, ts, projection.KindWorkSet, 1, workSetPayloadAt(future, work))
+	applyAssessmentProjection(t, ts, projection.KindLifePolicy, 1, lifePolicyPayloadAt(future, []string{"idle"}, []string{}))
+
+	presentation := getAssessment(t, ts, "mio")["work_presentation"].(map[string]any)
+	if presentation["kind"] != "presence" {
+		t.Fatalf("presentation kind = %v", presentation["kind"])
+	}
+	assertStringSet(t, presentation["queued_task_ids"], []string{"task-q"})
+	assertStringSet(t, presentation["waiting_task_ids"], []string{"task-w"})
+	assertStringSet(t, presentation["running_task_ids"], []string{"task-r"})
+
+	// Queued work alone is published as queued and never implies movement.
+	applyAssessmentProjection(t, ts, projection.KindWorkSet, 2, workSetPayloadAt(future, []any{workItem("task-q", "queued", boolPtr(false))}))
+	presentation = getAssessment(t, ts, "mio")["work_presentation"].(map[string]any)
+	if presentation["kind"] != "queued" {
+		t.Fatalf("presentation kind = %v", presentation["kind"])
+	}
+	assertStringSet(t, presentation["queued_task_ids"], []string{"task-q"})
+	if len(presentation["waiting_task_ids"].([]any)) != 0 || len(presentation["presence_task_ids"].([]any)) != 0 {
+		t.Fatalf("presentation = %v", presentation)
+	}
+}
+
+func workItem(taskID, state string, presence *bool) map[string]any {
+	item := map[string]any{
+		"task_id": taskID, "execution_state": state,
+		"work_class": "assigned_work", "classification_reason_code": "assigned",
+	}
+	if state == "running" {
+		item["run_id"] = "run-" + taskID
+	}
+	if presence != nil {
+		item["requires_house_presence"] = *presence
+	}
+	return item
+}
+
+func boolPtr(v bool) *bool { return &v }
 
 // TestAssessmentPublishesExecutableActivityCandidates publishes, from WORLD's
 // owner activity mapping, the candidates a controller may plan now. An activity

@@ -102,6 +102,55 @@ func TestPolicyFreshUsesAllowedActivities(t *testing.T) {
 	}
 }
 
+// TestWorkPresentationPublishesQueuedAndWaitingTaskIDs keeps D-13 observable:
+// queued work and waiting/blocked work are published by task ID so a consumer
+// can see why the Actor stays in place. Publishing them never claims movement:
+// queued work alone does not move, and waiting/blocked work starts nothing new.
+func TestWorkPresentationPublishesQueuedAndWaitingTaskIDs(t *testing.T) {
+	cases := []struct {
+		name         string
+		ws           *projection.WorkSet
+		wantKind     WorkPresentationKind
+		wantQueued   []string
+		wantWaiting  []string
+		wantRunning  []string
+		wantPresence []string
+	}{
+		{"queued only", workSet(future(), item("queued", true)), WorkQueued, []string{"task-queued"}, nil, nil, nil},
+		{"waiting only", workSet(future(), item("waiting", true)), WorkWaiting, nil, []string{"task-waiting"}, nil, nil},
+		{"blocked only", workSet(future(), item("blocked", true)), WorkWaiting, nil, []string{"task-blocked"}, nil, nil},
+		{"running no presence", workSet(future(), item("running", false)), WorkRemote, nil, nil, []string{"task-running"}, nil},
+		{"mixed presence dominates", workSet(future(), item("queued", true), item("waiting", true), item("running", true)), WorkPresence,
+			[]string{"task-queued"}, []string{"task-waiting"}, []string{"task-running"}, []string{"task-running"}},
+		{"expired set publishes nothing", workSet(past(), item("queued", true), item("waiting", true)), WorkNone, nil, nil, nil, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AssessForTest(t, tc.ws, policy(future(), []string{"rest"}, nil), StaticCatalog{"rest": true})
+			p := got.WorkPresentation
+			if p.Kind != tc.wantKind {
+				t.Fatalf("kind = %s, want %s", p.Kind, tc.wantKind)
+			}
+			assertIDs(t, "queued", p.QueuedTaskIDs, tc.wantQueued)
+			assertIDs(t, "waiting", p.WaitingTaskIDs, tc.wantWaiting)
+			assertIDs(t, "running", p.RunningTaskIDs, tc.wantRunning)
+			assertIDs(t, "presence", p.PresenceTaskIDs, tc.wantPresence)
+		})
+	}
+}
+
+func assertIDs(t *testing.T, label string, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s task IDs = %v, want %v", label, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s task IDs = %v, want %v", label, got, want)
+		}
+	}
+}
+
 func TestPolicyExpiredUsesOnlyRegisteredFallback(t *testing.T) {
 	got := AssessForTest(t, nil, policy(past(), []string{"walk", "rest"}, []string{"rest", "outside"}), StaticCatalog{"walk": true, "rest": true})
 	if got.PolicyState != PolicyExpired || !got.NewActivityAllowed {
