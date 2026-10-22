@@ -2,10 +2,19 @@ package life
 
 // RunningActivity describes an activity that has already started. Occupancy is
 // the physical resource (for example "seat" or "path") it still holds.
+//
+// A not-yet-started activity offered to the R09/R10 planning layer is
+// described by the same fields, so it reuses this shape instead of a second
+// activity type. RequiresMovement is only meaningful for such a candidate: it
+// records that admitting the activity would move the Actor away from its
+// current place.
 type RunningActivity struct {
 	ID        string
 	Occupancy string
-	Rule      *InterruptionRule
+	// RequiresMovement is whether starting this activity leaves the current
+	// place. Presence-required running work keeps the Actor in place.
+	RequiresMovement bool
+	Rule             *InterruptionRule
 }
 
 // InterruptionRule is required before an activity can be stopped. The rule
