@@ -20,6 +20,7 @@
         "internal/idmap/idmap_test.go",
         "internal/life/assess_test.go",
         "internal/life/catalog_test.go",
+        "internal/life/commands_test.go",
         "internal/life/controller_test.go",
         "internal/life/e2e_test.go",
         "internal/life/plan_test.go",
