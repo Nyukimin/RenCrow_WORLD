@@ -2,6 +2,7 @@ package life
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 )
 
@@ -64,6 +65,10 @@ type Candidate struct {
 var (
 	ErrInvalidAssessment = errors.New("life planning requires an Assess result")
 	ErrActivityRequired  = errors.New("life planning requires an activity ID")
+	// ErrActivityNotDefined reports that an activity has no WORLD owner
+	// definition, so no posture, occupancy, or interruption rule may be
+	// inferred for it. It is never treated as a permitted activity.
+	ErrActivityNotDefined = errors.New("life planning requires a registered activity definition")
 )
 
 // PlanContinuation decides whether a running non-cognitive activity keeps
@@ -142,6 +147,32 @@ func AdmitCandidate(assessment Assessment, candidate RunningActivity) (Candidate
 		return Candidate{}, ErrActivityRequired
 	}
 	return admit(assessment, candidate), nil
+}
+
+// StopPlanning evaluates WORLD's owner mapping for one activity the Actor is
+// already running, using only its ID: posture, logical occupancy, and the
+// interruption rule always come from the owner table, never from the caller.
+// Like the rest of this layer it selects nothing and changes nothing — it does
+// not stop, start, or move an Actor, cancel CORE work, or write WORLD State.
+// An ID outside the owner mapping is rejected instead of guessed at.
+func StopPlanning(assessment Assessment, activityID string) (Continuation, error) {
+	if err := validateAssessment(assessment); err != nil {
+		return Continuation{}, err
+	}
+	if activityID == "" {
+		return Continuation{}, ErrActivityRequired
+	}
+	for _, definition := range activityDefinitions {
+		if definition.ID != activityID {
+			continue
+		}
+		if definition.Rule != nil {
+			rule := *definition.Rule
+			definition.Rule = &rule
+		}
+		return PlanContinuation(assessment, definition)
+	}
+	return Continuation{}, fmt.Errorf("%w: %q", ErrActivityNotDefined, activityID)
 }
 
 func admit(assessment Assessment, activity RunningActivity) Candidate {

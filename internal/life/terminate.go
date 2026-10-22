@@ -32,6 +32,11 @@ type StopPlan struct {
 	BlockedReason    string
 	Actions          []string
 	ReleaseOccupancy bool
+	// StopState is the posture the Actor ends in when the stop is allowed. It
+	// comes from the activity's own interruption rule, so a consumer never has
+	// to read the owner mapping to act on the decision. It stays empty whenever
+	// the stop was refused, which grants no position change.
+	StopState string
 }
 
 // PlanStop separates cancelling an activity from releasing the physical
@@ -51,6 +56,7 @@ func PlanStop(activity RunningActivity, trigger string) StopPlan {
 		Allowed:          true,
 		Actions:          []string{"stop:" + activity.ID},
 		ReleaseOccupancy: activity.Rule.ReleaseOccupancy && activity.Occupancy != "",
+		StopState:        activity.Rule.StopState,
 	}
 	plan.Actions = append(plan.Actions, activity.Rule.Cleanup...)
 	return plan

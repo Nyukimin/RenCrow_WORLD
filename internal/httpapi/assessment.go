@@ -27,6 +27,23 @@ type assessmentBody struct {
 	NewActivityAllowed    bool                           `json:"new_activity_allowed"`
 	BlockedReason         string                         `json:"blocked_reason,omitempty"`
 	WorkSuccess           bool                           `json:"work_success"`
+	// StopPlanning is published only when the caller names a running activity.
+	// It is the deterministic safe-stop decision for that activity, never an
+	// executed stop.
+	StopPlanning *assessmentStopPlanBody `json:"stop_planning,omitempty"`
+}
+
+// assessmentStopPlanBody publishes one safe-stop decision (D-11). A "hold"
+// action means no safe stop exists, so no posture and no action is granted.
+type assessmentStopPlanBody struct {
+	ActivityID            string   `json:"activity_id"`
+	Action                string   `json:"action"`
+	Reason                string   `json:"reason"`
+	StopState             string   `json:"stop_state"`
+	StopActions           []string `json:"stop_actions"`
+	ReleaseOccupancy      bool     `json:"release_occupancy"`
+	RetainOccupancyReason string   `json:"retain_occupancy_reason,omitempty"`
+	ClearWorkPresentation bool     `json:"clear_work_presentation"`
 }
 
 type assessmentWorkPresentationBody struct {
@@ -92,6 +109,10 @@ func (s *Server) handleAssessment(w http.ResponseWriter, r *http.Request) {
 	if executable == nil {
 		executable = []string{}
 	}
+	stopPlan, err := s.stopPlanning(w, r, assessment)
+	if err != nil {
+		return
+	}
 	sort.Strings(permitted)
 	presence := append([]string(nil), assessment.WorkPresentation.PresenceTaskIDs...)
 	if presence == nil {
@@ -130,7 +151,43 @@ func (s *Server) handleAssessment(w http.ResponseWriter, r *http.Request) {
 		NewActivityAllowed:    assessment.NewActivityAllowed,
 		BlockedReason:         assessment.BlockedReason,
 		WorkSuccess:           assessment.WorkSuccess,
+		StopPlanning:          stopPlan,
 	})
+}
+
+// stopPlanning evaluates the safe-stop decision for the running activity named
+// by the caller. The activity ID is the only input the caller controls: WORLD's
+// owner mapping supplies the posture, logical occupancy, and interruption rule.
+// An ID outside that mapping is rejected rather than guessed at. Evaluating a
+// decision stops, starts, and moves nothing and writes no WORLD State.
+func (s *Server) stopPlanning(w http.ResponseWriter, r *http.Request, assessment life.Assessment) (*assessmentStopPlanBody, error) {
+	activityID := r.URL.Query().Get("stop_planning_activity_id")
+	if activityID == "" {
+		return nil, nil
+	}
+	decision, err := life.StopPlanning(assessment, activityID)
+	switch {
+	case errors.Is(err, life.ErrActivityNotDefined):
+		writeAPIError(w, http.StatusBadRequest, "unknown_activity", "the activity has no WORLD owner definition")
+		return nil, err
+	case err != nil:
+		writeAPIError(w, http.StatusInternalServerError, "assessment_unavailable", "the life assessment is unavailable")
+		return nil, err
+	}
+	actions := append([]string(nil), decision.Stop.Actions...)
+	if actions == nil {
+		actions = []string{}
+	}
+	return &assessmentStopPlanBody{
+		ActivityID:            activityID,
+		Action:                string(decision.Action),
+		Reason:                decision.Reason,
+		StopState:             decision.Stop.StopState,
+		StopActions:           actions,
+		ReleaseOccupancy:      decision.Stop.ReleaseOccupancy,
+		RetainOccupancyReason: decision.RetainOccupancyReason,
+		ClearWorkPresentation: decision.ClearWorkPresentation,
+	}, nil
 }
 
 func (s *Server) coreProjectionActor(actorID string) bool {

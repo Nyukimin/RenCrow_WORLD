@@ -316,3 +316,66 @@ func TestAdmitCandidateKeepsPresenceWorkInPlace(t *testing.T) {
 		t.Fatalf("expired WorkSet blocked a permitted activity: %+v", admitted)
 	}
 }
+
+// TestStopPlanningUsesOwnerDefinition stops a running activity that a fresh
+// policy no longer permits, using WORLD's owner mapping for the posture and the
+// occupancy rule. The caller supplies only the activity ID: occupancy, rule, and
+// posture always come from the owner table (D-11).
+func TestStopPlanningUsesOwnerDefinition(t *testing.T) {
+	got := AssessForTest(t, workSet(future(), item("running", true)), policy(future(), []string{"idle"}, nil), DefaultCatalog())
+
+	decision, err := StopPlanning(got, "read")
+	if err != nil {
+		t.Fatalf("StopPlanning: %v", err)
+	}
+	if decision.Action != ContinuationStop || decision.Reason != reasonActivityNotPermitted {
+		t.Fatalf("revoked activity = %+v", decision)
+	}
+	if decision.Stop.StopState != "standing" {
+		t.Fatalf("stop posture = %+v", decision.Stop)
+	}
+	if len(decision.Stop.Actions) != 1 || decision.Stop.Actions[0] != "stop:read" {
+		t.Fatalf("stop actions = %v", decision.Stop.Actions)
+	}
+	if decision.Stop.ReleaseOccupancy {
+		t.Fatalf("owner table grants no occupancy release yet: %+v", decision.Stop)
+	}
+	if decision.ClearWorkPresentation {
+		t.Fatalf("assigned WorkSet must not be cleared by a stop: %+v", decision)
+	}
+}
+
+// TestStopPlanningHoldsNonInterruptibleOwnerActivity pins that "sleep" defines
+// no safe interruption point, so a revoked permission holds the Actor in bed
+// instead of granting a position change.
+func TestStopPlanningHoldsNonInterruptibleOwnerActivity(t *testing.T) {
+	got := AssessForTest(t, nil, nil, DefaultCatalog())
+
+	decision, err := StopPlanning(got, "sleep")
+	if err != nil {
+		t.Fatalf("StopPlanning: %v", err)
+	}
+	if decision.Action != ContinuationHold || decision.Reason != "not_interruptible" {
+		t.Fatalf("sleep with a missing policy = %+v", decision)
+	}
+	if decision.Stop.Allowed || decision.Stop.StopState != "" || len(decision.Stop.Actions) != 0 {
+		t.Fatalf("held activity planned a stop: %+v", decision.Stop)
+	}
+}
+
+// TestStopPlanningRejectsUnregisteredActivity pins that an ID outside WORLD's
+// owner mapping and an empty ID are rejected instead of evaluated with a
+// guessed posture or occupancy.
+func TestStopPlanningRejectsUnregisteredActivity(t *testing.T) {
+	got := AssessForTest(t, nil, policy(future(), []string{"idle"}, nil), DefaultCatalog())
+
+	if _, err := StopPlanning(got, "walk_the_dog"); !errors.Is(err, ErrActivityNotDefined) {
+		t.Fatalf("unregistered activity error = %v", err)
+	}
+	if _, err := StopPlanning(got, ""); !errors.Is(err, ErrActivityRequired) {
+		t.Fatalf("empty activity error = %v", err)
+	}
+	if _, err := StopPlanning(Assessment{}, "read"); !errors.Is(err, ErrInvalidAssessment) {
+		t.Fatalf("invalid assessment error = %v", err)
+	}
+}

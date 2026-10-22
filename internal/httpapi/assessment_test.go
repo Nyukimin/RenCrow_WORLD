@@ -3,6 +3,7 @@ package httpapi
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -345,4 +346,131 @@ func TestAssessmentRouteIsReadOnly(t *testing.T) {
 	if allow := resp.Header.Get("Allow"); !strings.Contains(allow, http.MethodGet) {
 		t.Fatalf("Allow = %q", allow)
 	}
+}
+
+// TestAssessmentStopPlanningEvaluatesOwnerDefinition publishes the safe-stop
+// decision for one running activity from WORLD's owner mapping: a permitted
+// activity continues, a revoked one stops in the owner posture, and a
+// non-interruptible activity holds its position. The caller sends only the
+// activity ID, and nothing here starts, stops, or moves anything.
+func TestAssessmentStopPlanningEvaluatesOwnerDefinition(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	applyAssessmentProjection(t, ts, projection.KindWorkSet, 1, workSetPayloadAt(future, []any{}))
+	applyAssessmentProjection(t, ts, projection.KindLifePolicy, 1, lifePolicyPayloadAt(future, []string{"idle", "rest"}, []string{}))
+
+	if body := getAssessment(t, ts, "mio"); body["stop_planning"] != nil {
+		t.Fatalf("assessment without an activity published a stop plan: %v", body["stop_planning"])
+	}
+
+	planned := stopPlanningBody(t, ts, "mio", "rest")
+	if planned["activity_id"] != "rest" || planned["action"] != "continue" || planned["reason"] != "permitted" {
+		t.Fatalf("permitted activity = %v", planned)
+	}
+	if planned["stop_state"] != "" || planned["release_occupancy"] != false {
+		t.Fatalf("continued activity planned a stop: %v", planned)
+	}
+	if actions, ok := planned["stop_actions"].([]any); !ok || len(actions) != 0 {
+		t.Fatalf("continued activity stop_actions = %v", planned["stop_actions"])
+	}
+	// A fresh empty WorkSet is "no assignment now", which clears the work
+	// presentation without implying any work success (D-08).
+	if planned["clear_work_presentation"] != true {
+		t.Fatalf("empty WorkSet did not clear the presentation: %v", planned)
+	}
+
+	assigned := []any{workItem("task-1", "running", boolPtr(false))}
+	applyAssessmentProjection(t, ts, projection.KindWorkSet, 2, workSetPayloadAt(future, assigned))
+
+	planned = stopPlanningBody(t, ts, "mio", "change_clothes")
+	if planned["activity_id"] != "change_clothes" || planned["action"] != "stop" ||
+		planned["reason"] != "activity_not_permitted" {
+		t.Fatalf("revoked activity = %v", planned)
+	}
+	if planned["stop_state"] != "standing" {
+		t.Fatalf("stop posture = %v", planned)
+	}
+	assertStringSet(t, planned["stop_actions"], []string{"stop:change_clothes"})
+	if planned["release_occupancy"] != false {
+		t.Fatalf("owner mapping grants no occupancy release yet: %v", planned)
+	}
+	if _, present := planned["retain_occupancy_reason"]; present {
+		t.Fatalf("unexpected occupancy retention: %v", planned)
+	}
+	if planned["clear_work_presentation"] != false {
+		t.Fatalf("assigned work was cleared by a stop: %v", planned)
+	}
+
+	planned = stopPlanningBody(t, ts, "mio", "sleep")
+	if planned["action"] != "hold" || planned["reason"] != "not_interruptible" {
+		t.Fatalf("non-interruptible activity = %v", planned)
+	}
+	if planned["stop_state"] != "" {
+		t.Fatalf("held activity published a posture: %v", planned)
+	}
+	if actions, ok := planned["stop_actions"].([]any); !ok || len(actions) != 0 {
+		t.Fatalf("held activity stop_actions = %v", planned["stop_actions"])
+	}
+}
+
+// TestAssessmentStopPlanningRejectsUnregisteredActivity pins that an activity
+// outside WORLD's owner mapping is rejected instead of evaluated with a guessed
+// posture, while an empty parameter stays the no-stop-planning request.
+func TestAssessmentStopPlanningRejectsUnregisteredActivity(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	future := time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)
+	applyAssessmentProjection(t, ts, projection.KindLifePolicy, 1, lifePolicyPayloadAt(future, []string{"idle"}, []string{}))
+
+	resp := doRequest(t, http.MethodGet, stopPlanningURL(t, ts, "mio", "walk_the_dog"), readerToken, "", nil)
+	body := decodeMap(t, resp)
+	if resp.StatusCode != http.StatusBadRequest ||
+		body["error"].(map[string]any)["code"] != "unknown_activity" {
+		t.Fatalf("unregistered activity = %d: %v", resp.StatusCode, body)
+	}
+
+	resp = doRequest(t, http.MethodGet, stopPlanningURL(t, ts, "mio", ""), readerToken, "", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("empty activity parameter = %d: %s", resp.StatusCode, readBody(t, resp))
+	}
+	if body := decodeMap(t, resp); body["stop_planning"] != nil {
+		t.Fatalf("empty activity parameter published a stop plan: %v", body["stop_planning"])
+	}
+}
+
+// TestAssessmentStopPlanningStaysReadOnlyAndAuthorized pins that stop planning
+// keeps the assessment route's guarantees: it changes no World state, and an
+// unbound Actor stays forbidden even when it asks for a stop plan.
+func TestAssessmentStopPlanningStaysReadOnlyAndAuthorized(t *testing.T) {
+	ts, _ := newTestServer(t, nil)
+	before := decodeMap(t, doRequest(t, http.MethodGet, snapshotURL(ts), readerToken, "", nil))
+
+	if resp := doRequest(t, http.MethodGet, stopPlanningURL(t, ts, "kuro", "read"), readerToken, "", nil); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("unbound actor stop planning = %d", resp.StatusCode)
+	}
+	if resp := doRequest(t, http.MethodGet, stopPlanningURL(t, ts, "mio", "read"), streamerToken, "", nil); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("stream-only token stop planning = %d", resp.StatusCode)
+	}
+
+	after := decodeMap(t, doRequest(t, http.MethodGet, snapshotURL(ts), readerToken, "", nil))
+	if before["state_seq"] != after["state_seq"] || before["state_hash"] != after["state_hash"] {
+		t.Fatalf("stop planning changed World state: before=%v after=%v", before, after)
+	}
+}
+
+func stopPlanningBody(t *testing.T, ts *httptest.Server, actorID, activityID string) map[string]any {
+	t.Helper()
+	resp := doRequest(t, http.MethodGet, stopPlanningURL(t, ts, actorID, activityID), readerToken, "", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("stop planning %q = %d: %s", activityID, resp.StatusCode, readBody(t, resp))
+	}
+	body, ok := decodeMap(t, resp)["stop_planning"].(map[string]any)
+	if !ok {
+		t.Fatalf("stop_planning missing from %v", body)
+	}
+	return body
+}
+
+func stopPlanningURL(t *testing.T, ts *httptest.Server, actorID, activityID string) string {
+	t.Helper()
+	return assessmentURL(t, ts, actorID) + "?stop_planning_activity_id=" + url.QueryEscape(activityID)
 }

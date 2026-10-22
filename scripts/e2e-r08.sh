@@ -262,6 +262,30 @@ ASSESS="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$ASSESS_URL")"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CORE_TOKEN" "$ASSESS_URL")" = "403" ]
 [ "$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/snapshot" | json_get 'v["state_seq"]')" = "0" ]
 
+echo "== stop planning publishes the owner safe-stop decision =="
+STOP_REST="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$ASSESS_URL?stop_planning_activity_id=rest")"
+[ "$(printf '%s' "$STOP_REST" | json_get 'v["stop_planning"]["action"]')" = "continue" ]
+[ "$(printf '%s' "$STOP_REST" | json_get 'v["stop_planning"]["reason"]')" = "permitted" ]
+[ "$(printf '%s' "$STOP_REST" | json_get 'v["stop_planning"]["stop_actions"]')" = "[]" ]
+STOP_CLOTHES="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$ASSESS_URL?stop_planning_activity_id=change_clothes")"
+[ "$(printf '%s' "$STOP_CLOTHES" | json_get 'v["stop_planning"]["action"]')" = "stop" ]
+[ "$(printf '%s' "$STOP_CLOTHES" | json_get 'v["stop_planning"]["reason"]')" = "activity_not_permitted" ]
+[ "$(printf '%s' "$STOP_CLOTHES" | json_get 'v["stop_planning"]["stop_state"]')" = "standing" ]
+[ "$(printf '%s' "$STOP_CLOTHES" | json_get 'v["stop_planning"]["stop_actions"]')" = "['stop:change_clothes']" ]
+[ "$(printf '%s' "$STOP_CLOTHES" | json_get 'v["stop_planning"]["release_occupancy"]')" = "False" ]
+[ "$(printf '%s' "$STOP_CLOTHES" | json_get 'v["stop_planning"]["clear_work_presentation"]')" = "False" ]
+STOP_SLEEP="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$ASSESS_URL?stop_planning_activity_id=sleep")"
+[ "$(printf '%s' "$STOP_SLEEP" | json_get 'v["stop_planning"]["action"]')" = "hold" ]
+[ "$(printf '%s' "$STOP_SLEEP" | json_get 'v["stop_planning"]["reason"]')" = "not_interruptible" ]
+[ "$(printf '%s' "$STOP_SLEEP" | json_get 'v["stop_planning"]["stop_state"]')" = "" ]
+[ "$(printf '%s' "$ASSESS" | json_get 'v.get("stop_planning")')" = "None" ]
+CODE="$(curl -s -o "$TMP/stop-unknown.json" -w '%{http_code}' -H "Authorization: Bearer $READ_TOKEN" "$ASSESS_URL?stop_planning_activity_id=walk_the_dog")"
+[ "$CODE" = "400" ]
+grep -q '"code":"unknown_activity"' "$TMP/stop-unknown.json"
+CODE="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/actors/kuro/assessment?stop_planning_activity_id=read")"
+[ "$CODE" = "403" ]
+[ "$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/snapshot" | json_get 'v["state_seq"]')" = "0" ]
+
 echo "== invalid and unauthorized =="
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS_BAD" "$TMP/ack.json")"
 [ "$CODE" = "400" ]
@@ -295,6 +319,7 @@ ASSESS="$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/acto
 [ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["queued_task_ids"]')" = "[]" ]
 [ "$(printf '%s' "$ASSESS" | json_get 'v["work_presentation"]["waiting_task_ids"]')" = "[]" ]
 [ "$(printf '%s' "$ASSESS" | json_get 'v["executable_activity_ids"]')" = "[]" ]
+[ "$(curl -sS -H "Authorization: Bearer $READ_TOKEN" "$BASE$SCOPE_PATH/actors/mio/assessment?stop_planning_activity_id=walk" | json_get 'v["stop_planning"]["action"]')" = "continue" ]
 
 echo "== epoch reconciliation =="
 WS_E2="$(host_path "$TMP/ws-e2.json")"

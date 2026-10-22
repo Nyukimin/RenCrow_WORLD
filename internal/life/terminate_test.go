@@ -41,3 +41,24 @@ func TestPlanStopRejectsNonInterruptibleActivity(t *testing.T) {
 		t.Fatalf("non-interruptible = %+v", plan)
 	}
 }
+
+// TestPlanStopCarriesStopState pins that an allowed stop plan states the
+// posture the Actor ends in, so a consumer never has to read the owner table
+// to act on the decision. A refused stop keeps the posture empty (D-11).
+func TestPlanStopCarriesStopState(t *testing.T) {
+	plan := PlanStop(RunningActivity{
+		ID: "read", Occupancy: "study_seat",
+		Rule: &InterruptionRule{CanInterrupt: true, StopState: "standing"},
+	}, "activity_not_permitted")
+	if !plan.Allowed || plan.StopState != "standing" {
+		t.Fatalf("allowed stop plan = %+v", plan)
+	}
+
+	refused := PlanStop(RunningActivity{
+		ID: "sleep", Occupancy: "bed",
+		Rule: &InterruptionRule{CanInterrupt: false, StopState: "sitting"},
+	}, "policy_revoked")
+	if refused.Allowed || refused.StopState != "" {
+		t.Fatalf("refused stop plan = %+v", refused)
+	}
+}
