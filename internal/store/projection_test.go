@@ -221,3 +221,124 @@ func TestProjectionRejectsSupersededTimelineEpoch(t *testing.T) {
 		t.Fatalf("superseded err = %v", err)
 	}
 }
+
+// Failure / Problem: D-07 and docs/R09.md promise that re-receiving a
+// projection never extends its expiry and that only a newer CORE revision may
+// carry a new `valid_until`. Only the acknowledgement status was checked, so a
+// change that stored a refused payload's later expiry, or an acknowledgement
+// that reported a refused later expiry as held, would have broken the
+// documented invariant while every existing test still passed.
+//
+// Cause: the head write and the acknowledgement are both built from the
+// incoming projection, so nothing bound the stored and reported expiry to the
+// accepted head once a request was refused.
+//
+// Lesson / Invariant: for every non-accepted status WORLD keeps and reports the
+// held head's source epoch, revision, digest, and `valid_until`. Expiry extends
+// only when a newer source revision is accepted, and an older request carrying
+// a later expiry never becomes the held validity.
+//
+// Enforcement / Tests: TestProjectionReReceiptNeverExtendsValidity, against the
+// real SQLite EventStore.
+func TestProjectionReReceiptNeverExtendsValidity(t *testing.T) {
+	s, scope := openTestStore(t)
+	bindTestProjectionActors(t, s, scope)
+
+	const kind = ProjectionKindWorkSet
+	const actor = "mio"
+	heldUntil := projectionAt.Add(time.Hour)
+	laterUntil := projectionAt.Add(99 * time.Hour)
+
+	accepted := testProjection(scope, actor, "core-instance-mio", kind, "core-epoch-1", 10, `{"task":"a"}`)
+	accepted.ValidUntil = heldUntil
+	ack := applyProjection(t, s, accepted)
+	if ack.Status != ProjectionAccepted {
+		t.Fatalf("first ack = %+v", ack)
+	}
+	heldDigest := ack.Digest
+	heldAcceptedAt := ack.AcceptedAt
+
+	headHeld := func(status string, revision uint64, payload string) {
+		t.Helper()
+		head, err := s.ProjectionHead(scope, actor, kind)
+		if err != nil {
+			t.Fatalf("%s head: %v", status, err)
+		}
+		if head.SourceRevision != revision || head.SourceEpoch != "core-epoch-1" ||
+			string(head.Payload) != payload || !head.ValidUntil.Equal(heldUntil) {
+			t.Fatalf("%s head = %+v, want revision %d payload %s valid %v",
+				status, head, revision, payload, heldUntil)
+		}
+	}
+	ackReportsHeldHead := func(status, wantStatus string) {
+		t.Helper()
+		if status != wantStatus {
+			t.Fatalf("ack status = %q, want %q", status, wantStatus)
+		}
+		if ack.SourceEpoch != "core-epoch-1" || ack.SourceRevision != 10 ||
+			ack.Digest != heldDigest || !ack.ValidUntil.Equal(heldUntil) {
+			t.Fatalf("%s ack reported revision %d epoch %s digest %q valid %v, want the held head (revision 10, digest %q, valid %v)",
+				wantStatus, ack.SourceRevision, ack.SourceEpoch, ack.Digest, ack.ValidUntil, heldDigest, heldUntil)
+		}
+	}
+
+	duplicate := accepted
+	duplicate.ValidUntil = laterUntil
+	ack = applyProjection(t, s, duplicate)
+	ackReportsHeldHead(ack.Status, ProjectionDuplicate)
+	if !ack.AcceptedAt.Equal(heldAcceptedAt) {
+		t.Fatalf("duplicate ack accepted_at = %v, want the held head %v", ack.AcceptedAt, heldAcceptedAt)
+	}
+	headHeld(ProjectionDuplicate, 10, `{"task":"a"}`)
+
+	stale := testProjection(scope, actor, "core-instance-mio", kind, "core-epoch-1", 9, `{"task":"old"}`)
+	stale.ValidUntil = laterUntil
+	ack = applyProjection(t, s, stale)
+	ackReportsHeldHead(ack.Status, ProjectionStaleRevision)
+	headHeld(ProjectionStaleRevision, 10, `{"task":"a"}`)
+
+	conflict := testProjection(scope, actor, "core-instance-mio", kind, "core-epoch-1", 10, `{"task":"other"}`)
+	conflict.ValidUntil = laterUntil
+	ack = applyProjection(t, s, conflict)
+	ackReportsHeldHead(ack.Status, ProjectionRevisionConflict)
+	headHeld(ProjectionRevisionConflict, 10, `{"task":"a"}`)
+
+	// Only an accepted newer revision extends expiry.
+	newer := testProjection(scope, actor, "core-instance-mio", kind, "core-epoch-1", 11, `{"task":"b"}`)
+	newer.ValidUntil = laterUntil
+	if ack = applyProjection(t, s, newer); ack.Status != ProjectionAccepted {
+		t.Fatalf("newer ack = %+v", ack)
+	}
+	if !ack.ValidUntil.Equal(laterUntil) {
+		t.Fatalf("newer ack valid_until = %v, want %v", ack.ValidUntil, laterUntil)
+	}
+	head, err := s.ProjectionHead(scope, actor, kind)
+	if err != nil {
+		t.Fatalf("newer head: %v", err)
+	}
+	if head.SourceRevision != 11 || !head.ValidUntil.Equal(laterUntil) {
+		t.Fatalf("newer head = %+v, want revision 11 valid %v", head, laterUntil)
+	}
+	heldUntil = laterUntil
+
+	// A newer revision from another source epoch needs authenticated
+	// reconciliation first, and the refusal still reports the held head.
+	otherEpoch := testProjection(scope, actor, "core-instance-mio", kind, "core-epoch-2", 12, `{"task":"c"}`)
+	otherEpoch.ValidUntil = projectionAt.Add(200 * time.Hour)
+	ack = applyProjection(t, s, otherEpoch)
+	if ack.Status != ProjectionEpochRequiresReconcile {
+		t.Fatalf("other epoch ack = %+v", ack)
+	}
+	if ack.SourceEpoch != "core-epoch-1" || ack.SourceRevision != 11 ||
+		ack.Digest != head.Digest || !ack.ValidUntil.Equal(heldUntil) {
+		t.Fatalf("requires-reconcile ack reported revision %d epoch %s digest %q valid %v, want the held head (revision 11, digest %q, valid %v)",
+			ack.SourceRevision, ack.SourceEpoch, ack.Digest, ack.ValidUntil, head.Digest, heldUntil)
+	}
+	head, err = s.ProjectionHead(scope, actor, kind)
+	if err != nil {
+		t.Fatalf("head after refusal: %v", err)
+	}
+	if head.SourceRevision != 11 || head.SourceEpoch != "core-epoch-1" || !head.ValidUntil.Equal(heldUntil) {
+		t.Fatalf("head after refusal = %+v, want the accepted head unchanged", head)
+	}
+}

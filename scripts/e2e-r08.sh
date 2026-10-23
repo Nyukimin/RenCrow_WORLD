@@ -104,10 +104,11 @@ json_get() {
 }
 
 make_work_set() {
-  local out="$1" epoch="$2" rev="$3" active="$4" actor="${5:-mio}"
-  "$PYTHON" - "$out" "$epoch" "$rev" "$active" "$actor" <<'PY'
+  local out="$1" epoch="$2" rev="$3" active="$4" actor="${5:-mio}" expiry="${6:-2099-01-01T00:00:00Z}"
+  "$PYTHON" - "$out" "$epoch" "$rev" "$active" "$actor" "$expiry" <<'PY'
 import json, sys
 out, epoch, rev, active, actor = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5]
+expiry = sys.argv[6]
 instance = "core-instance-" + actor
 if active == "running":
     work = [{"task_id": "task-1", "run_id": "run-1", "execution_state": "running",
@@ -142,7 +143,7 @@ body = {
         "source_owner": "CORE",
         "source_epoch": epoch,
         "source_revision": rev,
-        "valid_until": "2099-01-01T00:00:00Z",
+        "valid_until": expiry,
         "active_work": work,
     },
 }
@@ -204,6 +205,8 @@ WS11="$(host_path "$TMP/ws11.json")"
 WS_QUEUED="$(host_path "$TMP/ws-queued.json")"
 WS_BAD="$(host_path "$TMP/ws-bad.json")"
 WS_KURO="$(host_path "$TMP/ws-kuro.json")"
+WS9_LATE="$(host_path "$TMP/ws9-late.json")"
+WS10_LATE="$(host_path "$TMP/ws10-late.json")"
 LP1="$(host_path "$TMP/lp1.json")"
 make_work_set "$WS10" core-epoch-1 10 running
 make_work_set "$WS9" core-epoch-1 9 queued
@@ -212,6 +215,8 @@ make_work_set "$WS11" core-epoch-1 11 queued
 make_work_set "$WS_QUEUED" core-epoch-1 12 queued
 make_work_set "$WS_BAD" core-epoch-1 13 bad_running
 make_work_set "$WS_KURO" core-epoch-1 1 queued kuro
+make_work_set "$WS9_LATE" core-epoch-1 9 queued mio "2099-06-01T00:00:00Z"
+make_work_set "$WS10_LATE" core-epoch-1 10 running mio "2099-06-01T00:00:00Z"
 make_life_policy "$LP1" core-epoch-1 1
 
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS10" "$TMP/ack.json")"
@@ -236,6 +241,22 @@ CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS10" "$TMP/
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS10_CONFLICT" "$TMP/ack.json")"
 [ "$CODE" = "409" ]
 [ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "revision_conflict" ]
+
+echo "== a refused re-send never reports or stores extended validity (D-07) =="
+CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS9_LATE" "$TMP/ack.json")"
+[ "$CODE" = "409" ]
+[ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "stale_revision" ]
+[ "$(json_get 'v["projection"]["valid_until"]' <"$TMP/ack.json")" = "2099-01-01T00:00:00Z" ]
+
+CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS10_LATE" "$TMP/ack.json")"
+[ "$CODE" = "409" ]
+[ "$(json_get 'v["projection"]["status"]' <"$TMP/ack.json")" = "revision_conflict" ]
+[ "$(json_get 'v["projection"]["valid_until"]' <"$TMP/ack.json")" = "2099-01-01T00:00:00Z" ]
+
+CODE="$(curl -sS -o "$TMP/head.json" -w '%{http_code}' -H "Authorization: Bearer $CORE_TOKEN" "$BASE$PROJECTION_PATH/mio/full_actor_work_set")"
+[ "$CODE" = "200" ]
+[ "$(json_get 'v["projection"]["source_revision"]' <"$TMP/head.json")" = "10" ]
+[ "$(json_get 'v["projection"]["valid_until"]' <"$TMP/head.json")" = "2099-01-01T00:00:00Z" ]
 
 CODE="$(put_projection "$PROJECTION_PATH/mio/full_actor_work_set" "$WS11" "$TMP/ack.json")"
 [ "$CODE" = "200" ]

@@ -205,7 +205,15 @@ func (s *Store) applyProjection(p Projection, reconcile bool) (ProjectionAck, er
 	}
 	reject := func(status, reason string) (ProjectionAck, error) {
 		ack.Status, ack.Reason = status, reason
-		if status == ProjectionDuplicate && found {
+		// A refusal reports what WORLD actually holds. Reporting the refused
+		// request's own revision, digest, epoch, or a later expiry would let a
+		// re-received projection look like it extended validity, which D-07
+		// forbids: only an accepted newer revision extends expiry.
+		if found {
+			ack.SourceEpoch = head.sourceEpoch
+			ack.SourceRevision = head.sourceRevision
+			ack.Digest = head.digest
+			ack.ValidUntil = head.validUntil
 			ack.AcceptedAt = head.acceptedAt
 		}
 		ack.ID = newID("prj")
