@@ -89,6 +89,125 @@ func TestLifecycleWiringGuardDetectsWiring(t *testing.T) {
 	}
 }
 
+// Failure / Problem: `SelectCandidate` connects WORLD's owner catalog to the R10
+// controller logic, and docs/R10.md records that no route or real Actor consumes
+// that selection while R10 items 1 (geometry evidence) and 3 (a single life
+// controller owning movement and occupancy) stay open. Prose alone would not
+// stop a later change from starting activities from a route.
+//
+// Cause: the boundary between a selectable candidate and a started activity had
+// no enforcement outside the controller's own refusals.
+//
+// Lesson / Invariant: production code outside `internal/life/` may not consume
+// candidate selection until the movement owner and its measured evidence close.
+//
+// Enforcement: this test scans production sources for the selection call and
+// keeps an evidence-bearing allowlist, so a new consumer fails and a stale entry
+// fails.
+//
+// Tests: TestCandidateSelectionStaysOffProductionRoutes (current tree, empty
+// allowlist) and TestCandidateSelectionGuardDetectsConsumer (the scan is not
+// vacuous: a fixture route that starts a selected candidate is reported).
+
+// selectionConsumerMarker names the catalog-side selection entry point.
+const selectionConsumerMarker = "SelectCandidate("
+
+// selectionOwnerDir owns the planning and controller logic, so files inside it
+// may consume selection.
+const selectionOwnerDir = "internal/life/"
+
+// selectionConsumerAllowlist maps a production file outside the owner directory
+// to the reason it may consume selection. It is empty while R10 items 1 and 3
+// stay open, and every entry must name the evidence that closed them.
+var selectionConsumerAllowlist = map[string]string{}
+
+func TestCandidateSelectionStaysOffProductionRoutes(t *testing.T) {
+	root := worldRepoRoot(t)
+	violations, err := selectionConsumerViolations(root)
+	if err != nil {
+		t.Fatalf("scan %s: %v", root, err)
+	}
+	if len(violations) > 0 {
+		t.Errorf("production code outside %s consumes candidate selection; R10 items 1 and 3 must close first (docs/R10.md):\n%s",
+			selectionOwnerDir, strings.Join(violations, "\n"))
+	}
+	for path := range selectionConsumerAllowlist {
+		t.Errorf("stale selection consumer allowlist entry %q names a file that no longer consumes selection", path)
+	}
+}
+
+func TestCandidateSelectionGuardDetectsConsumer(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "go.mod", "module fixture\n")
+	writeFixture(t, root, "internal/life/plan.go", "package life\n\nfunc SelectCandidate(a Assessment) (Candidate, RunningActivity, error) { return Candidate{}, RunningActivity{}, nil }\n")
+	writeFixture(t, root, "internal/life/plan_test.go", "package life\n\nvar _ = SelectCandidate(\n")
+	writeFixture(t, root, "internal/httpapi/server.go", "package httpapi\n\nfunc wire() { candidate, _, _ := life.SelectCandidate(assessment); start(candidate) }\n")
+
+	violations, err := selectionConsumerViolations(root)
+	if err != nil {
+		t.Fatalf("scan fixture: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("violations = %v, want only the consumer in internal/httpapi/server.go", violations)
+	}
+	if !strings.Contains(violations[0], "internal/httpapi/server.go") {
+		t.Fatalf("violation = %q, want the file that starts a selected candidate", violations[0])
+	}
+}
+
+func TestCandidateSelectionAllowlistRequiresEvidence(t *testing.T) {
+	for path, reason := range selectionConsumerAllowlist {
+		if !strings.Contains(reason, "R10") {
+			t.Errorf("allowlist entry %q must name the R10 items it closes; reason = %q", path, reason)
+		}
+	}
+}
+
+// selectionConsumerViolations lists every production file under root that calls
+// candidate selection outside the owner directory and outside the allowlist.
+func selectionConsumerViolations(root string) ([]string, error) {
+	var violations []string
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			switch entry.Name() {
+			case ".git", "Tmp", "node_modules", "vendor":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if strings.HasPrefix(rel, selectionOwnerDir) {
+			return nil
+		}
+		if _, allowed := selectionConsumerAllowlist[rel]; allowed {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(content), selectionConsumerMarker) {
+			violations = append(violations, fmt.Sprintf("%s calls %s", rel, selectionConsumerMarker))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(violations)
+	return violations, nil
+}
+
 func TestLifecycleWiringAllowlistRequiresEvidence(t *testing.T) {
 	for path, reason := range lifecycleWiringAllowlist {
 		if !strings.Contains(reason, "R10") {

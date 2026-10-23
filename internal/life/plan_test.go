@@ -2,6 +2,7 @@ package life
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -454,6 +455,93 @@ func TestPlanningRejectsInconsistentAssessment(t *testing.T) {
 			if _, err := StopPlanning(got, "rest"); !errors.Is(err, ErrInvalidAssessment) {
 				t.Fatalf("StopPlanning error = %v", err)
 			}
+			candidate, definition, err := SelectCandidate(got)
+			if !errors.Is(err, ErrInvalidAssessment) {
+				t.Fatalf("SelectCandidate error = %v, candidate = %+v", err, candidate)
+			}
+			if candidate.Allowed || candidate.ActivityID != "" || definition.ID != "" {
+				t.Fatalf("an inconsistent assessment selected a candidate: %+v %+v", candidate, definition)
+			}
 		})
+	}
+}
+
+// SelectCandidate is the D-28 connection between WORLD's owner catalog and the
+// R10 controller: it reads the owner mapping only, never the caller's copy, and
+// returns the one activity the controller may start now. It selects nothing
+// rather than a candidate whose start would move the Actor, because measured
+// movement and spatial readiness stay D-17/D-18 work.
+func TestSelectCandidateUsesTheOwnerCatalog(t *testing.T) {
+	granted := AssessForTest(t, nil, policy(future(), []string{"walk", "read", "idle"}, nil), DefaultCatalog())
+	admitted, definition, err := SelectCandidate(granted)
+	if err != nil {
+		t.Fatalf("SelectCandidate: %v", err)
+	}
+	if !admitted.Allowed || admitted.ActivityID != "idle" || admitted.Reason != "admitted" {
+		t.Fatalf("selected candidate = %+v", admitted)
+	}
+	// The returned definition is WORLD's owner mapping for that ID, not a
+	// caller-supplied guess: idle relocates nothing and holds nothing.
+	if definition.ID != "idle" || definition.RequiresMovement || definition.Occupancy != "" {
+		t.Fatalf("owner definition = %+v", definition)
+	}
+	if definition.Rule == nil || definition.Rule.StopState != "standing" {
+		t.Fatalf("owner interruption rule = %+v", definition.Rule)
+	}
+
+	// A caller mutating the returned copy must not change the owner mapping or
+	// the next selection.
+	definition.Occupancy = "bed"
+	definition.RequiresMovement = true
+	next, nextDefinition, err := SelectCandidate(granted)
+	if err != nil {
+		t.Fatalf("SelectCandidate after mutation: %v", err)
+	}
+	if !next.Allowed || next.ActivityID != "idle" || nextDefinition.Occupancy != "" || nextDefinition.RequiresMovement {
+		t.Fatalf("mutated owner mapping: %+v %+v", next, nextDefinition)
+	}
+}
+
+// Selection selects nothing instead of implying a movement, and every
+// "no candidate" answer names the WORLD reason it came from.
+func TestSelectCandidateSelectsNothingRatherThanMovement(t *testing.T) {
+	movingOnly := AssessForTest(t, workSet(future()), policy(future(), []string{"walk", "read"}, nil), DefaultCatalog())
+	admitted, definition, err := SelectCandidate(movingOnly)
+	if !errors.Is(err, ErrNoCandidate) {
+		t.Fatalf("movement-only selection error = %v", err)
+	}
+	if admitted.Allowed || admitted.ActivityID != "" || definition.ID != "" {
+		t.Fatalf("movement-only selection returned a candidate: %+v %+v", admitted, definition)
+	}
+
+	blocked := AssessForTest(t, nil, nil, DefaultCatalog())
+	_, _, err = SelectCandidate(blocked)
+	if !errors.Is(err, ErrNoCandidate) || !strings.Contains(err.Error(), "policy_missing") {
+		t.Fatalf("missing policy selection error = %v", err)
+	}
+
+	expired := AssessForTest(t, workSet(future()), policy(past(), []string{"idle"}, nil), DefaultCatalog())
+	_, _, err = SelectCandidate(expired)
+	if !errors.Is(err, ErrNoCandidate) || !strings.Contains(err.Error(), "policy_expired_no_fallback") {
+		t.Fatalf("expired policy selection error = %v", err)
+	}
+}
+
+// Presence-required work keeps the Actor in place, so only an activity that
+// relocates nothing stays selectable while that work runs.
+func TestSelectCandidateKeepsPresenceWorkInPlace(t *testing.T) {
+	presence := AssessForTest(t, workSet(future(), item("running", true)), policy(future(), []string{"walk", "idle"}, nil), DefaultCatalog())
+	admitted, definition, err := SelectCandidate(presence)
+	if err != nil {
+		t.Fatalf("SelectCandidate: %v", err)
+	}
+	if !admitted.Allowed || admitted.ActivityID != "idle" || definition.RequiresMovement {
+		t.Fatalf("presence selection = %+v %+v", admitted, definition)
+	}
+
+	// A registered ID outside the current permission is never selected.
+	revoked := AssessForTest(t, nil, policy(future(), []string{"walk"}, nil), DefaultCatalog())
+	if _, _, err := SelectCandidate(revoked); !errors.Is(err, ErrNoCandidate) {
+		t.Fatalf("revoked permission selection error = %v", err)
 	}
 }

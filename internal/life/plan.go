@@ -65,6 +65,10 @@ type Candidate struct {
 var (
 	ErrInvalidAssessment = errors.New("life planning requires an Assess result")
 	ErrActivityRequired  = errors.New("life planning requires an activity ID")
+	// ErrNoCandidate reports that no activity may be selected now: the
+	// Assessment grants nothing, or every admitted activity would move the
+	// Actor. It carries the WORLD reason and admits nothing on its own.
+	ErrNoCandidate = errors.New("life selects no activity candidate")
 	// ErrActivityNotDefined reports that an activity has no WORLD owner
 	// definition, so no posture, occupancy, or interruption rule may be
 	// inferred for it. It is never treated as a permitted activity.
@@ -147,6 +151,36 @@ func AdmitCandidate(assessment Assessment, candidate RunningActivity) (Candidate
 		return Candidate{}, ErrActivityRequired
 	}
 	return admit(assessment, candidate), nil
+}
+
+// SelectCandidate is how WORLD's own catalog reaches the R10 controller (D-28):
+// it returns the single activity the controller may start now, taken from the
+// owner mapping in activity-ID order, never from a caller-supplied definition.
+// It selects at most one candidate and mutates nothing — no Event, no State
+// change, no Command Receipt, and no movement.
+//
+// A candidate whose start would move the Actor is never selected. Selecting it
+// would plan a move the controller cannot execute and would read as a claim
+// that a place exists or is reachable, and measured movement plus spatial
+// readiness stay D-17/D-18 work. ExecutableActivityIDs keeps publishing the
+// wider candidate set for the later controller that owns movement.
+func SelectCandidate(assessment Assessment) (Candidate, RunningActivity, error) {
+	if err := validateAssessment(assessment); err != nil {
+		return Candidate{}, RunningActivity{}, err
+	}
+	if !assessment.NewActivityAllowed {
+		// The Assessment already names why: missing policy, an expired policy
+		// with no registered fallback, or nothing registered at all.
+		return Candidate{}, RunningActivity{}, fmt.Errorf("%w: %s", ErrNoCandidate, assessment.BlockedReason)
+	}
+	for _, definition := range DefaultActivityDefinitions() {
+		admitted := admit(assessment, definition)
+		if !admitted.Allowed || definition.RequiresMovement {
+			continue
+		}
+		return admitted, definition, nil
+	}
+	return Candidate{}, RunningActivity{}, fmt.Errorf("%w: no_activity_selectable", ErrNoCandidate)
 }
 
 // StopPlanning evaluates WORLD's owner mapping for one activity the Actor is

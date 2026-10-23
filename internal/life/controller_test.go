@@ -203,6 +203,44 @@ func TestControllerRejectsMismatchedAdmission(t *testing.T) {
 	}
 }
 
+// TestControllerStartsTheSelectedCandidate closes the D-28 loop from WORLD's
+// owner catalog through selection into the controller ledger: the start receipt
+// is the only effect, the position never changes, and a selection that found no
+// candidate leaves the ledger untouched.
+func TestControllerStartsTheSelectedCandidate(t *testing.T) {
+	assessed := AssessForTest(t, workSet(future()), policy(future(), []string{"walk", "idle"}, nil), DefaultCatalog())
+	admitted, definition, err := SelectCandidate(assessed)
+	if err != nil {
+		t.Fatalf("SelectCandidate: %v", err)
+	}
+	ledger := newControllerSpace("study_room", "", "", "standing")
+	if err := ExecuteAdmission(ledger, admitted, definition); err != nil {
+		t.Fatalf("ExecuteAdmission: %v", err)
+	}
+	if ledger.Activity != "idle" || ledger.Occupancy != "" || ledger.Position != "study_room" {
+		t.Fatalf("selected start wrong: %+v", ledger)
+	}
+	if len(ledger.Actions) != 1 || ledger.Actions[0] != "start:idle" {
+		t.Fatalf("start receipts = %v", ledger.Actions)
+	}
+	if err := ExecuteAdmission(ledger, admitted, definition); !errors.Is(err, ErrBusyLedger) {
+		t.Fatalf("second start accepted: %v", err)
+	}
+
+	movingOnly := AssessForTest(t, workSet(future()), policy(future(), []string{"walk", "read"}, nil), DefaultCatalog())
+	unselected, unselectedDefinition, err := SelectCandidate(movingOnly)
+	if !errors.Is(err, ErrNoCandidate) {
+		t.Fatalf("movement-only selection error = %v", err)
+	}
+	empty := newControllerSpace("study_room", "", "", "standing")
+	if err := ExecuteAdmission(empty, unselected, unselectedDefinition); !errors.Is(err, ErrCandidateNotAdmitted) {
+		t.Fatalf("unselected candidate started: %v", err)
+	}
+	if empty.Activity != "" || empty.Occupancy != "" || len(empty.Actions) != 0 {
+		t.Fatalf("unselected candidate mutated the ledger: %+v", empty)
+	}
+}
+
 func TestControllerRefusesOccupancyOverwriteOnStart(t *testing.T) {
 	assessed := AssessForTest(t, workSet(future()), policy(future(), []string{"rest"}, nil), DefaultCatalog())
 	admitted, err := AdmitCandidate(assessed, activity("rest", "study_seat", interruptible("standing", true)))
