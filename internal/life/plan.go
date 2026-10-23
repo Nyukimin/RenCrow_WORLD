@@ -209,6 +209,12 @@ func requiresPresence(assessment Assessment) bool {
 	return assessment.WorkPresentation.Kind == WorkPresence
 }
 
+// validateAssessment rejects an Assessment that Assess could not have produced,
+// so no plan may be built on meaning this layer cannot explain. An undefined
+// presentation kind would silently read as "no presence requirement" and admit
+// a moving candidate, and the permission flag always comes from the permitted
+// set with its reason: separating them would open a permission with no permitted
+// activity or reject a candidate without naming why (D-09, D-10, D-12).
 func validateAssessment(assessment Assessment) error {
 	switch assessment.WorkSetState {
 	case WorkSetMissing, WorkSetExpired, WorkSetEmpty, WorkSetAssigned:
@@ -218,6 +224,17 @@ func validateAssessment(assessment Assessment) error {
 	switch assessment.PolicyState {
 	case PolicyMissing, PolicyFresh, PolicyExpired:
 	default:
+		return ErrInvalidAssessment
+	}
+	switch assessment.WorkPresentation.Kind {
+	case WorkNone, WorkQueued, WorkWaiting, WorkRemote, WorkPresence:
+	default:
+		return ErrInvalidAssessment
+	}
+	if assessment.NewActivityAllowed != (len(assessment.PermittedActivityIDs) > 0) {
+		return ErrInvalidAssessment
+	}
+	if assessment.NewActivityAllowed == (assessment.BlockedReason != "") {
 		return ErrInvalidAssessment
 	}
 	return nil

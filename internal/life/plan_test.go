@@ -379,3 +379,81 @@ func TestStopPlanningRejectsUnregisteredActivity(t *testing.T) {
 		t.Fatalf("invalid assessment error = %v", err)
 	}
 }
+
+// TestPlanningRejectsInconsistentAssessment pins that the planning layer never
+// consumes an Assessment that `Assess` could not have produced. An undefined
+// presentation kind would silently read as "no presence requirement" and let a
+// moving candidate in, and a permission flag separated from the permitted set
+// or its blocked reason would either open a permission with no permitted
+// activity or reject a candidate with no reason. Every entry point fails as
+// ErrInvalidAssessment with no partial decision (D-09, D-10, D-12).
+func TestPlanningRejectsInconsistentAssessment(t *testing.T) {
+	granted := AssessForTest(t, nil, policy(future(), []string{"rest"}, nil), DefaultCatalog())
+	denied := AssessForTest(t, nil, nil, DefaultCatalog())
+	if denied.NewActivityAllowed || denied.BlockedReason != "policy_missing" {
+		t.Fatalf("denied assessment = %+v", denied)
+	}
+
+	tests := []struct {
+		name  string
+		build func() Assessment
+	}{
+		{name: "undefined presentation kind", build: func() Assessment {
+			got := granted
+			got.WorkPresentation.Kind = "moving"
+			return got
+		}},
+		{name: "missing presentation kind", build: func() Assessment {
+			got := granted
+			got.WorkPresentation.Kind = ""
+			return got
+		}},
+		{name: "permission without a permitted activity", build: func() Assessment {
+			got := granted
+			got.PermittedActivityIDs = nil
+			return got
+		}},
+		{name: "permitted activities without permission", build: func() Assessment {
+			got := granted
+			got.NewActivityAllowed = false
+			got.BlockedReason = "policy_expired_no_fallback"
+			return got
+		}},
+		{name: "permission carrying a blocked reason", build: func() Assessment {
+			got := granted
+			got.BlockedReason = "policy_expired_no_fallback"
+			return got
+		}},
+		{name: "denial without a blocked reason", build: func() Assessment {
+			got := denied
+			got.BlockedReason = ""
+			return got
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := test.build()
+
+			continuation, err := PlanContinuation(got, activity("rest", "seat", interruptible("lying", false)))
+			if !errors.Is(err, ErrInvalidAssessment) {
+				t.Fatalf("PlanContinuation error = %v, decision = %+v", err, continuation)
+			}
+			if continuation.Action != "" || continuation.Reason != "" || continuation.Stop.Allowed {
+				t.Fatalf("an inconsistent assessment returned a partial decision: %+v", continuation)
+			}
+			candidate, err := AdmitCandidate(got, activity("rest", "seat", interruptible("lying", false)))
+			if !errors.Is(err, ErrInvalidAssessment) {
+				t.Fatalf("AdmitCandidate error = %v, candidate = %+v", err, candidate)
+			}
+			if candidate.Allowed || candidate.ActivityID != "" {
+				t.Fatalf("an inconsistent assessment admitted a candidate: %+v", candidate)
+			}
+			if _, err := ExecutableActivityIDs(got, DefaultActivityDefinitions()); !errors.Is(err, ErrInvalidAssessment) {
+				t.Fatalf("ExecutableActivityIDs error = %v", err)
+			}
+			if _, err := StopPlanning(got, "rest"); !errors.Is(err, ErrInvalidAssessment) {
+				t.Fatalf("StopPlanning error = %v", err)
+			}
+		})
+	}
+}
