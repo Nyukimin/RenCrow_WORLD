@@ -73,14 +73,37 @@ func (s Scope) valid() bool {
 }
 
 type ActorState struct {
-	RoomID     string `json:"room_id"`
-	ActivityID string `json:"activity_id,omitempty"`
+	RoomID                string      `json:"room_id"`
+	ActivityID            string      `json:"activity_id,omitempty"`
+	ActivityKind          string      `json:"activity_kind,omitempty"`
+	PoseID                string      `json:"pose_id,omitempty"`
+	ActivityStartedAt     string      `json:"activity_started_at,omitempty"`
+	ActivityDueAt         string      `json:"activity_due_at,omitempty"`
+	TargetRoomID          string      `json:"target_room_id,omitempty"`
+	TargetSlotID          string      `json:"target_slot_id,omitempty"`
+	MovePhase             string      `json:"move_phase,omitempty"`
+	MoveRouteID           string      `json:"move_route_id,omitempty"`
+	MovePathIDs           string      `json:"move_path_ids,omitempty"`
+	MoveResourceIDs       string      `json:"move_resource_ids,omitempty"`
+	LayoutSHA256          string      `json:"layout_sha256,omitempty"`
+	HomeSceneSHA256       string      `json:"home_scene_sha256,omitempty"`
+	SlotID                string      `json:"slot_id,omitempty"`
+	Position              *[3]float64 `json:"position,omitempty"`
+	ActivitySequence      uint64      `json:"activity_sequence,omitempty"`
+	MirrorPoseCompletions uint64      `json:"mirror_pose_completions,omitempty"`
 }
 
 type ActivityState struct {
-	ID      string `json:"id"`
-	ActorID string `json:"actor_id"`
-	Status  string `json:"status"`
+	ID           string `json:"id"`
+	ActorID      string `json:"actor_id"`
+	Status       string `json:"status"`
+	Kind         string `json:"kind,omitempty"`
+	PoseID       string `json:"pose_id,omitempty"`
+	StartedAt    string `json:"started_at,omitempty"`
+	DueAt        string `json:"due_at,omitempty"`
+	EndedAt      string `json:"ended_at,omitempty"`
+	LayoutSHA256 string `json:"layout_sha256,omitempty"`
+	SceneSHA256  string `json:"scene_sha256,omitempty"`
 }
 
 type ResourceState struct {

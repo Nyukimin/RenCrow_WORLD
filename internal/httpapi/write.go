@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/Nyukimin/RenCrow_WORLD/internal/life"
 	"github.com/Nyukimin/RenCrow_WORLD/internal/store"
 )
 
@@ -58,12 +59,38 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_payload", "payload must be valid UTF-8 JSON")
 		return
 	}
-	principal, apiErr := s.authenticate(r)
-	if apiErr != nil {
-		// The auth wrapper already authenticated this request; this branch is a
-		// defensive guard for direct handler use.
-		writeAPIError(w, apiErr.status, apiErr.code, apiErr.message)
-		return
+	principal, ok := r.Context().Value(principalContextKey{}).(principal)
+	if !ok {
+		var apiErr *apiError
+		principal, apiErr = s.authenticate(r)
+		if apiErr != nil {
+			writeAPIError(w, apiErr.status, apiErr.code, apiErr.message)
+			return
+		}
+	}
+	if life.IsHomeAction(req.Action) {
+		if !principal.allows("life") {
+			writeAPIError(w, http.StatusForbidden, "forbidden", "the credential does not allow life commands")
+			return
+		}
+		actorID, err := life.HomeCommandActorID(req.Action, payload)
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, "invalid_life_command", "life command payload must name one exact actor")
+			return
+		}
+		if !principal.lifeActorIDs[actorID] {
+			writeAPIError(w, http.StatusForbidden, "actor_forbidden", "the credential is not authorized for this Actor")
+			return
+		}
+	} else {
+		if strings.HasPrefix(req.Action, "life.home.") {
+			writeAPIError(w, http.StatusForbidden, "unknown_life_action", "the life action is outside the closed command vocabulary")
+			return
+		}
+		if !principal.allows("write") {
+			writeAPIError(w, http.StatusForbidden, "forbidden", "the credential does not allow standard commands")
+			return
+		}
 	}
 	result, err := s.store.Append(store.Command{
 		Scope:            s.cfg.Scope,

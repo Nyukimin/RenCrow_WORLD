@@ -7,18 +7,21 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Nyukimin/RenCrow_WORLD/internal/life"
 	"github.com/Nyukimin/RenCrow_WORLD/internal/store"
 )
 
 type snapshotDTO struct {
-	SchemaVersion int         `json:"schema_version"`
-	WorldID       string      `json:"world_id"`
-	TimelineID    string      `json:"timeline_id"`
-	TimelineEpoch string      `json:"timeline_epoch"`
-	StateSeq      uint64      `json:"state_seq"`
-	StateHash     string      `json:"state_hash"`
-	State         store.State `json:"state"`
-	Reason        string      `json:"reason,omitempty"`
+	SchemaVersion   int                    `json:"schema_version"`
+	WorldID         string                 `json:"world_id"`
+	TimelineID      string                 `json:"timeline_id"`
+	TimelineEpoch   string                 `json:"timeline_epoch"`
+	StateSeq        uint64                 `json:"state_seq"`
+	StateHash       string                 `json:"state_hash"`
+	State           store.State            `json:"state"`
+	HomeSceneSHA256 string                 `json:"home_scene_sha256,omitempty"`
+	HomeMovePoints  map[string][]life.Vec3 `json:"home_move_points,omitempty"`
+	Reason          string                 `json:"reason,omitempty"`
 }
 
 type eventDTO struct {
@@ -60,7 +63,7 @@ func (s *Server) snapshotDTO() (snapshotDTO, error) {
 	if err != nil {
 		return snapshotDTO{}, err
 	}
-	return snapshotDTO{
+	dto := snapshotDTO{
 		SchemaVersion: SchemaVersion,
 		WorldID:       s.cfg.Scope.WorldID,
 		TimelineID:    s.cfg.Scope.TimelineID,
@@ -68,7 +71,24 @@ func (s *Server) snapshotDTO() (snapshotDTO, error) {
 		StateSeq:      seq,
 		StateHash:     hash,
 		State:         state,
-	}, nil
+	}
+	if s.home != nil {
+		dto.HomeSceneSHA256 = s.home.SceneSHA256()
+		for actorID, actor := range state.Actors {
+			if actor.ActivityKind != life.HomeActivityMove {
+				continue
+			}
+			points, err := s.home.MovePoints(state, actorID)
+			if err != nil {
+				continue
+			}
+			if dto.HomeMovePoints == nil {
+				dto.HomeMovePoints = map[string][]life.Vec3{}
+			}
+			dto.HomeMovePoints[actorID] = points
+		}
+	}
+	return dto, nil
 }
 
 func (s *Server) handleSnapshot(w http.ResponseWriter, _ *http.Request) {

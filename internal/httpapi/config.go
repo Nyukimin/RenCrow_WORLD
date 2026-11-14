@@ -22,6 +22,7 @@ const (
 var validScopes = map[string]bool{
 	"read":                 true,
 	"write":                true,
+	"life":                 true,
 	"stream":               true,
 	"projection":           true,
 	"projection_reconcile": true,
@@ -32,6 +33,7 @@ var validScopes = map[string]bool{
 type Config struct {
 	Listen           string              `json:"listen"`
 	StorePath        string              `json:"store_path"`
+	HomeLayoutPath   string              `json:"home_layout_path,omitempty"`
 	Scope            store.Scope         `json:"scope"`
 	Tokens           []TokenConfig       `json:"tokens"`
 	Page             PageConfig          `json:"page"`
@@ -61,9 +63,10 @@ type TokenConfig struct {
 	// independent of the rotating credential ID, so replacing a token does not
 	// change Command idempotency or projection audit identity. It defaults to
 	// the token ID when omitted.
-	PublisherID string       `json:"publisher_id,omitempty"`
-	Scopes      []string     `json:"scopes"`
-	Scope       *store.Scope `json:"scope,omitempty"`
+	PublisherID  string       `json:"publisher_id,omitempty"`
+	Scopes       []string     `json:"scopes"`
+	Scope        *store.Scope `json:"scope,omitempty"`
+	LifeActorIDs []string     `json:"life_actor_ids,omitempty"`
 }
 
 type PageConfig struct {
@@ -145,6 +148,7 @@ func NormalizeConfig(cfg Config) (Config, error) {
 		return Config{}, errors.New("at least one token is required")
 	}
 	seenIDs := map[string]bool{}
+	needsHomeLayout := false
 	for i := range cfg.Tokens {
 		t := &cfg.Tokens[i]
 		if t.ID == "" || len(t.ID) > 64 || strings.TrimSpace(t.ID) != t.ID || hasControl(t.ID) {
@@ -171,6 +175,7 @@ func NormalizeConfig(cfg Config) (Config, error) {
 			return Config{}, fmt.Errorf("token %q has no scopes", t.ID)
 		}
 		seenScopes := map[string]bool{}
+		hasLifeScope := false
 		for _, s := range t.Scopes {
 			if !validScopes[s] {
 				return Config{}, fmt.Errorf("token %q has unknown scope %q", t.ID, s)
@@ -179,10 +184,33 @@ func NormalizeConfig(cfg Config) (Config, error) {
 				return Config{}, fmt.Errorf("token %q repeats scope %q", t.ID, s)
 			}
 			seenScopes[s] = true
+			if s == "life" {
+				hasLifeScope = true
+				needsHomeLayout = true
+			}
+		}
+		seenLifeActors := map[string]bool{}
+		for _, actorID := range t.LifeActorIDs {
+			if !validConfigExact(actorID, 256) || seenLifeActors[actorID] {
+				return Config{}, fmt.Errorf("token %q has an invalid or duplicate life_actor_ids entry", t.ID)
+			}
+			seenLifeActors[actorID] = true
+		}
+		if hasLifeScope != (len(t.LifeActorIDs) > 0) {
+			return Config{}, fmt.Errorf("token %q requires life_actor_ids exactly when it has the life scope", t.ID)
+		}
+		if hasLifeScope && seenScopes["write"] {
+			return Config{}, fmt.Errorf("token %q cannot combine the life and write scopes", t.ID)
 		}
 		if t.Scope != nil && !t.Scope.Valid() {
 			return Config{}, fmt.Errorf("token %q has an invalid bound scope", t.ID)
 		}
+	}
+	if cfg.HomeLayoutPath != "" && strings.TrimSpace(cfg.HomeLayoutPath) != cfg.HomeLayoutPath {
+		return Config{}, errors.New("home_layout_path must be an exact path")
+	}
+	if needsHomeLayout && cfg.HomeLayoutPath == "" {
+		return Config{}, errors.New("a life token requires home_layout_path")
 	}
 	needsProjectionBinding := false
 	for _, t := range cfg.Tokens {

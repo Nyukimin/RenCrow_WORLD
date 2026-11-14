@@ -7,17 +7,20 @@
 package httpapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/Nyukimin/RenCrow_WORLD/internal/idmap"
+	"github.com/Nyukimin/RenCrow_WORLD/internal/life"
 	"github.com/Nyukimin/RenCrow_WORLD/internal/store"
 )
 
@@ -26,16 +29,18 @@ const maxCommandBody = store.MaxCommandBytes + 4096
 type Server struct {
 	cfg     Config
 	store   *store.Store
+	home    *life.HomeController
 	handler http.Handler
 	tokens  []tokenEntry
 }
 
 type tokenEntry struct {
-	id          string
-	publisherID string
-	sha256      string
-	scopes      map[string]bool
-	scope       *store.Scope
+	id           string
+	publisherID  string
+	sha256       string
+	scopes       map[string]bool
+	lifeActorIDs map[string]bool
+	scope        *store.Scope
 }
 
 type principal struct {
@@ -43,7 +48,10 @@ type principal struct {
 	publisherID  string
 	credentialID string
 	scopes       map[string]bool
+	lifeActorIDs map[string]bool
 }
+
+type principalContextKey struct{}
 
 func (p principal) allows(scope string) bool {
 	if scope == "" {
@@ -59,18 +67,44 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	var home *life.HomeController
+	if cfg.HomeLayoutPath != "" {
+		layout, err := life.LoadHomeLayout(cfg.HomeLayoutPath)
+		if err != nil {
+			return nil, fmt.Errorf("load home layout: %w", err)
+		}
+		home, err = life.NewHomeController(layout, nil)
+		if err != nil {
+			return nil, fmt.Errorf("initialize home controller: %w", err)
+		}
+		if cfg.InitialState != nil {
+			initial := *cfg.InitialState
+			initial.Resources = cloneResourceCapacities(initial.Resources)
+			for id, capacity := range home.ResourceCapacities() {
+				if current, exists := initial.Resources[id]; exists && current != capacity {
+					return nil, fmt.Errorf("home resource %q must have capacity %d", id, capacity)
+				}
+				initial.Resources[id] = capacity
+			}
+			cfg.InitialState = &initial
+		}
+	}
 	st, err := store.Open(cfg.StorePath)
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: cfg, store: st}
+	s := &Server{cfg: cfg, store: st, home: home}
 	for _, t := range cfg.Tokens {
 		scopes := make(map[string]bool, len(t.Scopes))
 		for _, sc := range t.Scopes {
 			scopes[sc] = true
 		}
+		lifeActors := make(map[string]bool, len(t.LifeActorIDs))
+		for _, actorID := range t.LifeActorIDs {
+			lifeActors[actorID] = true
+		}
 		s.tokens = append(s.tokens, tokenEntry{
-			id: t.ID, publisherID: t.PublisherID, sha256: t.SHA256, scopes: scopes, scope: t.Scope,
+			id: t.ID, publisherID: t.PublisherID, sha256: t.SHA256, scopes: scopes, lifeActorIDs: lifeActors, scope: t.Scope,
 		})
 	}
 	if cfg.InitialState != nil {
@@ -81,6 +115,22 @@ func New(cfg Config) (*Server, error) {
 				return nil, err
 			}
 		} else if err != nil {
+			_ = st.Close()
+			return nil, err
+		}
+	}
+	if home != nil {
+		home.Register(st)
+		if state, _, _, err := st.Snapshot(cfg.Scope); err == nil {
+			for _, token := range cfg.Tokens {
+				for _, actorID := range token.LifeActorIDs {
+					if _, ok := state.Actors[actorID]; !ok {
+						_ = st.Close()
+						return nil, fmt.Errorf("life actor %q must exist in the Timeline", actorID)
+					}
+				}
+			}
+		} else if !errors.Is(err, store.ErrTimelineNotFound) {
 			_ = st.Close()
 			return nil, err
 		}
@@ -117,7 +167,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/events", s.auth("read", s.handleEvents))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/receipts/{receipt}", s.auth("read", s.handleReceipt))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/actors/{actor}/assessment", s.auth("read", s.handleAssessment))
-	mux.HandleFunc("POST /v1/worlds/{world}/timelines/{timeline}/commands", s.auth("write", s.handleCommand))
+	mux.HandleFunc("POST /v1/worlds/{world}/timelines/{timeline}/commands", s.commandAuth(s.handleCommand))
 	mux.HandleFunc("PUT /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("", s.handleCoreProjection))
 	mux.HandleFunc("GET /v1/worlds/{world}/timelines/{timeline}/core-projections/{actor}/{kind}", s.auth("", s.handleProjectionHead))
 	mux.HandleFunc("POST /v1/worlds/{world}/timelines/{timeline}/core-projections/reconcile", s.auth("projection_reconcile", s.handleProjectionReconcile))
@@ -158,8 +208,27 @@ func (s *Server) auth(scope string, next http.HandlerFunc) http.HandlerFunc {
 				return
 			}
 		}
-		next(w, r)
+		next(w, r.WithContext(context.WithValue(r.Context(), principalContextKey{}, p)))
 	}
+}
+
+func (s *Server) commandAuth(next http.HandlerFunc) http.HandlerFunc {
+	return s.auth("", func(w http.ResponseWriter, r *http.Request) {
+		p, ok := r.Context().Value(principalContextKey{}).(principal)
+		if !ok || (!p.allows("write") && !p.allows("life")) {
+			writeAPIError(w, http.StatusForbidden, "forbidden", "the credential does not allow commands")
+			return
+		}
+		next(w, r)
+	})
+}
+
+func cloneResourceCapacities(resources map[string]int64) map[string]int64 {
+	cloned := make(map[string]int64, len(resources))
+	for id, capacity := range resources {
+		cloned[id] = capacity
+	}
+	return cloned
 }
 
 func (s *Server) authenticate(r *http.Request) (principal, *apiError) {
@@ -178,7 +247,7 @@ func (s *Server) authenticate(r *http.Request) (principal, *apiError) {
 			return principal{}, &apiError{status: http.StatusForbidden, code: "scope_mismatch", message: "the credential is bound to another scope"}
 		}
 		return principal{
-			id: t.id, publisherID: t.publisherID, credentialID: t.id, scopes: t.scopes,
+			id: t.id, publisherID: t.publisherID, credentialID: t.id, scopes: t.scopes, lifeActorIDs: t.lifeActorIDs,
 		}, nil
 	}
 	return principal{}, &apiError{status: http.StatusUnauthorized, code: "unauthorized", message: "a bearer token is required"}
