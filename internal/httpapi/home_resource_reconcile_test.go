@@ -80,8 +80,8 @@ func TestHomeResourceReconcileAddsNewLayoutResourcesToPersistedTimeline(t *testi
 	}
 	_ = move.Body.Close()
 	before, beforeSeq, _, err := first.store.Snapshot(cfg.Scope)
-	if err != nil || len(before.Reservations) != 1 || before.Actors["hold"].ActivityID == "" {
-		t.Fatalf("old move was not held: state=%+v seq=%d err=%v", before, beforeSeq, err)
+	if err != nil || len(before.Reservations) != 0 || before.Actors["hold"].ActivityID == "" || before.Actors["hold"].MovePhase != "in_transit" {
+		t.Fatalf("new move should remain active without a corridor reservation: state=%+v seq=%d err=%v", before, beforeSeq, err)
 	}
 	oldReceipt, err := first.store.GetReceipt(cfg.Scope, moveReceipt.Receipt.ReceiptID)
 	if err != nil {

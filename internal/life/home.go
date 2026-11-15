@@ -964,7 +964,6 @@ func (c *HomeController) resolveRoute(actorID string, actor store.ActorState, ta
 	resourceIDs := make([]string, 0, len(edges))
 	for _, edge := range edges {
 		pathIDs = append(pathIDs, edge.ID)
-		resourceIDs = append(resourceIDs, c.pathResources[edge.ID])
 		appendVec3s(&points, edge.Points)
 		appendVec3(&points, c.layout.RoomAnchors[edge.ToRoomID])
 		durationMS += edge.DurationMS

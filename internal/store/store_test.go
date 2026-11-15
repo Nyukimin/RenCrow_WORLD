@@ -603,3 +603,96 @@ func TestCrashChild(t *testing.T) {
 	}))
 	t.Fatalf("append returned without hitting crash point %q", point)
 }
+
+func TestReplayClearsReleasedReservations(t *testing.T) {
+	s, scope := openTestStore(t)
+	started, err := s.Append(testCommand(scope, "replay-reserve", "activity_start", map[string]any{
+		"activity_id": "act-replay", "actor_id": "mio",
+		"resources": []map[string]any{{"resource_id": "chair", "quantity": 1}},
+	}))
+	if err != nil || started.Receipt.Status != "committed" {
+		t.Fatalf("start reserved activity: receipt=%+v err=%v", started.Receipt, err)
+	}
+	stopped, err := s.Append(testCommand(scope, "replay-release", "activity_cancel", map[string]any{"activity_id": "act-replay"}))
+	if err != nil || stopped.Receipt.Status != "committed" {
+		t.Fatalf("cancel reserved activity: receipt=%+v err=%v", stopped.Receipt, err)
+	}
+	live, liveSeq, liveHash, err := s.Snapshot(scope)
+	if err != nil {
+		t.Fatalf("snapshot after release: %v", err)
+	}
+	if len(live.Reservations) != 0 {
+		t.Fatalf("live reservations after release = %+v, want none", live.Reservations)
+	}
+	replayed, replayHash, replaySeq, err := s.Replay(scope, liveSeq)
+	if err != nil || replaySeq != liveSeq || replayHash != liveHash || !reflectStateEqual(replayed, live) {
+		t.Fatalf("replay after release = state=%+v seq=%d hash=%s err=%v; live=%+v seq=%d hash=%s", replayed, replaySeq, replayHash, err, live, liveSeq, liveHash)
+	}
+}
+
+func TestReplayClearsLegacyNullReservationDelta(t *testing.T) {
+	s, scope := openTestStore(t)
+	started, err := s.Append(testCommand(scope, "legacy-null-reserve", "activity_start", map[string]any{
+		"activity_id": "act-legacy-null", "actor_id": "mio",
+		"resources": []map[string]any{{"resource_id": "chair", "quantity": 1}},
+	}))
+	if err != nil || started.Receipt.Status != "committed" {
+		t.Fatalf("start reserved activity: receipt=%+v err=%v", started.Receipt, err)
+	}
+	stopped, err := s.Append(testCommand(scope, "legacy-null-release", "activity_cancel", map[string]any{"activity_id": "act-legacy-null"}))
+	if err != nil || stopped.Receipt.Status != "committed" {
+		t.Fatalf("cancel reserved activity: receipt=%+v err=%v", stopped.Receipt, err)
+	}
+	live, liveSeq, liveHash, err := s.Snapshot(scope)
+	if err != nil || len(live.Reservations) != 0 {
+		t.Fatalf("snapshot after release = reservations=%+v err=%v, want none", live.Reservations, err)
+	}
+
+	var deltaJSON []byte
+	err = s.db.QueryRow(`SELECT delta_json FROM txn WHERE world_id = ? AND timeline_id = ? AND timeline_epoch = ? AND last_seq = ?`,
+		scope.WorldID, scope.TimelineID, scope.TimelineEpoch, stopped.Receipt.LastSeq).Scan(&deltaJSON)
+	if err != nil {
+		t.Fatalf("read release delta fixture: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(deltaJSON, &fields); err != nil {
+		t.Fatalf("decode release delta fixture: %v", err)
+	}
+	fields["reservations"] = json.RawMessage("null")
+	legacyDelta, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatalf("encode legacy null delta fixture: %v", err)
+	}
+	if _, err := s.db.Exec(`UPDATE txn SET delta_json = ? WHERE world_id = ? AND timeline_id = ? AND timeline_epoch = ? AND last_seq = ?`,
+		legacyDelta, scope.WorldID, scope.TimelineID, scope.TimelineEpoch, stopped.Receipt.LastSeq); err != nil {
+		t.Fatalf("write legacy null delta fixture: %v", err)
+	}
+
+	replayed, replayHash, replaySeq, err := s.Replay(scope, liveSeq)
+	if err != nil || replaySeq != liveSeq || replayHash != liveHash || !reflectStateEqual(replayed, live) {
+		t.Fatalf("replay legacy null clear = state=%+v seq=%d hash=%s err=%v; live=%+v seq=%d hash=%s", replayed, replaySeq, replayHash, err, live, liveSeq, liveHash)
+	}
+}
+
+func TestApplyDeltaReservationFieldSemantics(t *testing.T) {
+	original := []Reservation{{ResourceID: "chair", ActorID: "mio", ActivityID: "act-1", Quantity: 1}}
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want []Reservation
+	}{
+		{name: "missing preserves", raw: `{"actors":{}}`, want: original},
+		{name: "null clears legacy delta", raw: `{"reservations":null}`},
+		{name: "empty array clears", raw: `{"reservations":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			state := State{Reservations: append([]Reservation(nil), original...)}
+			if err := applyDelta(&state, []byte(tc.raw)); err != nil {
+				t.Fatalf("apply delta: %v", err)
+			}
+			if !reflectStateEqual(State{Reservations: state.Reservations}, State{Reservations: tc.want}) {
+				t.Fatalf("reservations after %s = %+v, want %+v", tc.name, state.Reservations, tc.want)
+			}
+		})
+	}
+}

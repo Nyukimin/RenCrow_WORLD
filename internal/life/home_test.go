@@ -204,23 +204,23 @@ func TestHomeMoveRequiresDirectedPathAndOwnerPrivateRoom(t *testing.T) {
 	}
 }
 
-func TestHomePathReservationIsSharedByExactReverseCorridor(t *testing.T) {
+func TestHomeReverseCorridorDoesNotSerializeActiveMoves(t *testing.T) {
 	now := time.Date(2026, 11, 14, 1, 15, 0, 0, time.UTC)
 	st, controller := homeTestStore(t, sampleHomeLayout(), map[string]store.ActorState{
 		"kuro":  homeActorAt("living", Vec3{0, 0, 0}, ""),
 		"shiro": homeActorAt("lounge", Vec3{40, 0, 0}, ""),
 	}, &now)
 	if got := len(controller.ResourceCapacities()); got != 8 {
-		t.Fatalf("resources=%d, want shared reverse-pair capacity plus four slots", got)
+		t.Fatalf("resources=%d, want path-edge and slot capacities retained for existing moves", got)
 	}
 	first := appendHome(t, st, now, "corridor-forward", ActionHomeMove, `{"actor_id":"kuro","room_id":"lounge"}`)
-	if first.Receipt.Status != "committed" {
-		t.Fatalf("forward move: %+v", first.Receipt)
-	}
 	second := appendHome(t, st, now, "corridor-reverse", ActionHomeMove, `{"actor_id":"shiro","room_id":"living"}`)
 	state := homeSnapshot(t, st)
-	if second.Receipt.Status != "rejected" || state.Actors["shiro"].RoomID != "lounge" || len(state.Reservations) != 1 {
-		t.Fatalf("reverse direction bypassed shared corridor reservation: receipt=%+v state=%+v", second.Receipt, state.Reservations)
+	if first.Receipt.Status != "committed" || second.Receipt.Status != "committed" ||
+		len(state.Reservations) != 0 ||
+		state.Actors["kuro"].MovePhase != "in_transit" || state.Actors["shiro"].MovePhase != "in_transit" {
+		t.Fatalf("reverse-direction concurrent moves = first=%+v second=%+v reservations=%+v kuro=%+v shiro=%+v, want both active without corridor reservations",
+			first.Receipt, second.Receipt, state.Reservations, state.Actors["kuro"], state.Actors["shiro"])
 	}
 }
 
@@ -235,12 +235,16 @@ func TestHomeMovesReserveTheirTargetSlot(t *testing.T) {
 		"shiro": homeActorAt("exercise", Vec3{20, 0, 0}, ""),
 	}, &now)
 	first := appendHome(t, st, now, "sofa-first", ActionHomeMove, `{"actor_id":"kuro","room_id":"lounge","slot_id":"sofa"}`)
-	if first.Receipt.Status != "committed" || len(homeSnapshot(t, st).Reservations) != 2 {
-		t.Fatalf("first route did not reserve both corridor and target slot: receipt=%+v reservations=%v", first.Receipt, homeSnapshot(t, st).Reservations)
+	firstState := homeSnapshot(t, st)
+	if first.Receipt.Status != "committed" || len(firstState.Reservations) != 1 ||
+		firstState.Reservations[0].ResourceID != homeSlotResource("sofa") {
+		t.Fatalf("first route reservations=%+v, want only the exclusive target slot: receipt=%+v", firstState.Reservations, first.Receipt)
 	}
 	second := appendHome(t, st, now, "sofa-second", ActionHomeMove, `{"actor_id":"shiro","room_id":"lounge","slot_id":"sofa"}`)
 	state := homeSnapshot(t, st)
-	if second.Receipt.Status != "rejected" || state.Actors["shiro"].RoomID != "exercise" || len(state.Reservations) != 2 {
+	if second.Receipt.Status != "rejected" || second.Receipt.Reason != "resource_conflict" ||
+		state.Actors["shiro"].RoomID != "exercise" || len(state.Reservations) != 1 ||
+		state.Reservations[0].ResourceID != homeSlotResource("sofa") {
 		t.Fatalf("parallel route bypassed target slot reservation: receipt=%+v shiro=%+v reservations=%v", second.Receipt, state.Actors["shiro"], state.Reservations)
 	}
 }

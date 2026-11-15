@@ -1007,7 +1007,7 @@ type delta struct {
 	Actors       map[string]*ActorState    `json:"actors,omitempty"`
 	Activities   map[string]*ActivityState `json:"activities,omitempty"`
 	Resources    map[string]*ResourceState `json:"resources,omitempty"`
-	Reservations *[]Reservation            `json:"reservations,omitempty"`
+	Reservations json.RawMessage           `json:"reservations,omitempty"`
 }
 
 func diffState(before, after State) ([]byte, error) {
@@ -1049,8 +1049,12 @@ func diffState(before, after State) ([]byte, error) {
 			d.Resources[k] = nil
 		}
 	}
-	res := append([]Reservation(nil), after.Reservations...)
-	d.Reservations = &res
+	res := append([]Reservation{}, after.Reservations...)
+	reservationDelta, err := json.Marshal(res)
+	if err != nil {
+		return nil, err
+	}
+	d.Reservations = reservationDelta
 	return json.Marshal(d)
 }
 
@@ -1063,7 +1067,11 @@ func applyDelta(state *State, raw []byte) error {
 	state.Activities = applyMap(state.Activities, d.Activities)
 	state.Resources = applyMap(state.Resources, d.Resources)
 	if d.Reservations != nil {
-		state.Reservations = append([]Reservation(nil), (*d.Reservations)...)
+		var reservations []Reservation
+		if err := json.Unmarshal(d.Reservations, &reservations); err != nil {
+			return err
+		}
+		state.Reservations = append([]Reservation(nil), reservations...)
 		sortReservations(state.Reservations)
 	}
 	return nil
