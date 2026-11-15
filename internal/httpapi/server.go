@@ -26,6 +26,11 @@ import (
 
 const maxCommandBody = store.MaxCommandBytes + 4096
 
+const (
+	homeResourceReconcileAction   = "internal.world.home_resources_reconcile"
+	homeResourceReconcileClientID = "\x01world.home_resource_reconcile"
+)
+
 type Server struct {
 	cfg     Config
 	store   *store.Store
@@ -119,6 +124,7 @@ func New(cfg Config) (*Server, error) {
 			return nil, err
 		}
 	}
+	var homeResourceAdditions map[string]int64
 	if home != nil {
 		home.Register(st)
 		if state, _, _, err := st.Snapshot(cfg.Scope); err == nil {
@@ -130,6 +136,11 @@ func New(cfg Config) (*Server, error) {
 					}
 				}
 			}
+			homeResourceAdditions, err = missingHomeResources(state, home.ResourceCapacities())
+			if err != nil {
+				_ = st.Close()
+				return nil, err
+			}
 		} else if !errors.Is(err, store.ErrTimelineNotFound) {
 			_ = st.Close()
 			return nil, err
@@ -137,6 +148,12 @@ func New(cfg Config) (*Server, error) {
 	}
 	for _, binding := range cfg.CoreProjectionActors {
 		if err := st.BindProjectionActor(cfg.Scope, binding.ActorID, binding.ActorInstanceID, nowUTC()); err != nil {
+			_ = st.Close()
+			return nil, err
+		}
+	}
+	if len(homeResourceAdditions) > 0 {
+		if err := appendHomeResourceReconciliation(st, cfg.Scope, homeResourceAdditions); err != nil {
 			_ = st.Close()
 			return nil, err
 		}
@@ -229,6 +246,58 @@ func cloneResourceCapacities(resources map[string]int64) map[string]int64 {
 		cloned[id] = capacity
 	}
 	return cloned
+}
+
+func missingHomeResources(state store.State, capacities map[string]int64) (map[string]int64, error) {
+	missing := make(map[string]int64)
+	for id, capacity := range capacities {
+		if existing, ok := state.Resources[id]; ok {
+			if existing.Capacity != capacity {
+				return nil, fmt.Errorf("home resource %q must have capacity %d", id, capacity)
+			}
+			continue
+		}
+		missing[id] = capacity
+	}
+	return missing, nil
+}
+
+func appendHomeResourceReconciliation(st *store.Store, scope store.Scope, additions map[string]int64) error {
+	if len(additions) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(struct {
+		Resources map[string]int64 `json:"resources"`
+	}{Resources: additions})
+	if err != nil {
+		return err
+	}
+	digest := sha256.Sum256(payload)
+	key := "home-resource-reconcile/" + hex.EncodeToString(digest[:])
+	handler := func(state store.State, _ json.RawMessage) (store.Outcome, error) {
+		for id, capacity := range additions {
+			if _, exists := state.Resources[id]; exists {
+				return store.Outcome{}, fmt.Errorf("home resource %q appeared during reconciliation", id)
+			}
+			state.Resources[id] = store.ResourceState{Capacity: capacity}
+		}
+		return store.Outcome{
+			State:  state,
+			Events: []store.EventDraft{{Kind: "home.resources_reconciled", Payload: payload}},
+		}, nil
+	}
+	result, err := st.AppendWithHandler(store.Command{
+		Scope: scope, ClientID: homeResourceReconcileClientID,
+		IdempotencyKey: key, Action: homeResourceReconcileAction,
+		Payload: payload, RecordedAt: nowUTC(),
+	}, handler)
+	if err != nil {
+		return fmt.Errorf("reconcile home resources: %w", err)
+	}
+	if result.Receipt.Status != "committed" {
+		return fmt.Errorf("reconcile home resources: %s", result.Receipt.Reason)
+	}
+	return nil
 }
 
 func (s *Server) authenticate(r *http.Request) (principal, *apiError) {

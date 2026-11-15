@@ -409,6 +409,19 @@ func (s *Store) CreateTimeline(scope Scope, initial State, resources map[string]
 }
 
 func (s *Store) Append(cmd Command) (Result, error) {
+	return s.append(cmd, nil)
+}
+
+// AppendWithHandler uses one explicit internal handler for this command without
+// registering its action in the Store's public command vocabulary.
+func (s *Store) AppendWithHandler(cmd Command, handler Handler) (Result, error) {
+	if handler == nil {
+		return Result{}, ErrInvalidCommand
+	}
+	return s.append(cmd, handler)
+}
+
+func (s *Store) append(cmd Command, override Handler) (Result, error) {
 	if !cmd.Scope.valid() || cmd.ClientID == "" || cmd.IdempotencyKey == "" ||
 		strings.TrimSpace(cmd.ClientID) != cmd.ClientID || strings.TrimSpace(cmd.IdempotencyKey) != cmd.IdempotencyKey ||
 		cmd.Action == "" || !utf8.Valid(cmd.Payload) {
@@ -470,6 +483,9 @@ func (s *Store) Append(cmd Command) (Result, error) {
 		return reject("state_conflict")
 	}
 	handler, ok := s.handlers[cmd.Action]
+	if override != nil {
+		handler, ok = override, true
+	}
 	if !ok {
 		return reject("unknown_action")
 	}
@@ -544,10 +560,11 @@ func (s *Store) Append(cmd Command) (Result, error) {
 		return Result{}, err
 	}
 	for id, r := range after.Resources {
-		if _, err := tx.ExecContext(ctx, `UPDATE resource SET capacity = ?, used = ?
-			WHERE world_id = ? AND timeline_id = ? AND timeline_epoch = ? AND resource_id = ?`,
-			r.Capacity, r.Used,
-			cmd.Scope.WorldID, cmd.Scope.TimelineID, cmd.Scope.TimelineEpoch, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO resource
+			(world_id, timeline_id, timeline_epoch, resource_id, capacity, used) VALUES (?, ?, ?, ?, ?, ?)
+			ON CONFLICT(world_id, timeline_id, timeline_epoch, resource_id)
+			DO UPDATE SET capacity = excluded.capacity, used = excluded.used`,
+			cmd.Scope.WorldID, cmd.Scope.TimelineID, cmd.Scope.TimelineEpoch, id, r.Capacity, r.Used); err != nil {
 			return Result{}, err
 		}
 	}
