@@ -16,6 +16,7 @@
         "internal/store/backup_test.go",
         "internal/httpapi/httpapi_test.go",
         "internal/httpapi/home_auth_test.go",
+        "internal/httpapi/home_resource_reconcile_test.go",
         "internal/httpapi/assessment_test.go",
         "internal/httpapi/projection_test.go",
         "internal/idmap/idmap_test.go",
