@@ -78,6 +78,7 @@ var (
 	ErrHomeLayoutChanged    = errors.New("home layout changed while the Activity was active")
 	ErrHomeClockReversed    = errors.New("home server clock precedes the Activity start")
 	ErrHomeAlreadyThere     = errors.New("home Actor is already at the requested position")
+	ErrHomeSeatOccupied     = errors.New("home seat is occupied")
 )
 
 // Vec3 is one finite [x,y,z] coordinate in the measured scene coordinate frame.
@@ -528,6 +529,15 @@ func (c *HomeController) handleMove(state store.State, raw json.RawMessage) (sto
 	route, err := c.resolveRoute(cmd.ActorID, actor, cmd.RoomID, cmd.SlotID)
 	if err != nil {
 		return store.Outcome{}, err
+	}
+	if slot := c.slots[route.targetSlotID]; slot.Kind == HomeSlotRest {
+		// The route reservation covers incoming moves. A committed arrival
+		// retains the seat until the occupant's departure commits.
+		for id, occupant := range state.Actors {
+			if id != cmd.ActorID && occupant.SlotID == slot.ID {
+				return store.Outcome{}, ErrHomeSeatOccupied
+			}
+		}
 	}
 	now := c.now().UTC()
 	return c.startActivity(state, cmd.ActorID, HomeActivityMove, "", route.targetSlotID, route.durationMS, now, EventHomeMoveStarted, func(event *homeEvent) {

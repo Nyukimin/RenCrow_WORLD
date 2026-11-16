@@ -1,0 +1,685 @@
+{
+  "schema_version": "world.home-layout/v1",
+  "scene_sha256": "602a80fee5ce300ecfd3bee8cb4b316f4b3c95a6fda207a14cc95e06aaac840e",
+  "room_anchors": {
+    "living": [1.2, 0.21, 3.65],
+    "dining": [10.65, 0.21, 3.6],
+    "stairs-ground": [-1.8, 0.21, 4.83],
+    "landing-second": [-1.8, 3.72, -2.76],
+    "stairs-attic": [4.88, 3.72, -3.38],
+    "landing-attic": [9.64, 7.25, -0.42],
+    "hall-second": [-0.51, 3.72, 4.92],
+    "hall-attic": [8.55, 7.25, 1.9],
+    "attic-window": [8.95, 7.25, -0.5],
+    "upper-room-2-1": [-9.16, 3.72, 1.58],
+    "upper-room-2-2": [-4.1, 3.72, 2.64],
+    "upper-room-2-3": [2.35, 3.72, 1.4],
+    "upper-room-2-4": [9.35, 3.72, 1.96],
+    "upper-room-3-1": [-8.07, 7.25, 0.73],
+    "upper-room-3-2": [-1.395, 7.25, 0.88],
+    "upper-room-3-3": [5.24, 7.25, 0.24]
+  },
+  "paths": [
+    {
+      "id": "living-dining-out",
+      "from_room_id": "living",
+      "to_room_id": "dining",
+      "points": [
+        [6.73, 0.21, 3.62]
+      ],
+      "duration_ms": 8438
+    },
+    {
+      "id": "living-dining-back",
+      "from_room_id": "dining",
+      "to_room_id": "living",
+      "points": [
+        [6.73, 0.21, 3.62]
+      ],
+      "duration_ms": 8438
+    },
+    {
+      "id": "living-stairs-out",
+      "from_room_id": "living",
+      "to_room_id": "stairs-ground",
+      "points": [
+        [0.64, 0.21, 3.95],
+        [0.24, 0.21, 4.33],
+        [0.16, 0.21, 4.62],
+        [-0.45, 0.21, 4.83]
+      ],
+      "duration_ms": 3110
+    },
+    {
+      "id": "living-stairs-back",
+      "from_room_id": "stairs-ground",
+      "to_room_id": "living",
+      "points": [
+        [-0.45, 0.21, 4.83],
+        [0.16, 0.21, 4.62],
+        [0.24, 0.21, 4.33],
+        [0.64, 0.21, 3.95]
+      ],
+      "duration_ms": 3110
+    },
+    {
+      "id": "stairs-second-out",
+      "from_room_id": "stairs-ground",
+      "to_room_id": "landing-second",
+      "points": [
+        [-1.8, 0.21, 3.66],
+        [-1.8, 0.414, 3.66],
+        [-1.8, 0.414, 3.355],
+        [-1.8, 0.588, 3.355],
+        [-1.8, 0.588, 3.05],
+        [-1.8, 0.762, 3.05],
+        [-1.8, 0.762, 2.745],
+        [-1.8, 0.936, 2.745],
+        [-1.8, 0.936, 2.44],
+        [-1.8, 1.11, 2.44],
+        [-1.8, 1.11, 2.135],
+        [-1.8, 1.284, 2.135],
+        [-1.8, 1.284, 1.83],
+        [-1.8, 1.458, 1.83],
+        [-1.8, 1.458, 1.525],
+        [-1.8, 1.632, 1.525],
+        [-1.8, 1.632, 1.22],
+        [-1.8, 1.806, 1.22],
+        [-1.8, 1.806, 0.915],
+        [-1.8, 1.98, 0.915],
+        [-1.8, 1.98, 0.61],
+        [-1.8, 2.154, 0.61],
+        [-1.8, 2.154, 0.305],
+        [-1.8, 2.328, 0.305],
+        [-1.8, 2.328, 0.0],
+        [-1.8, 2.502, 0.0],
+        [-1.8, 2.502, -0.305],
+        [-1.8, 2.676, -0.305],
+        [-1.8, 2.676, -0.61],
+        [-1.8, 2.85, -0.61],
+        [-1.8, 2.85, -0.915],
+        [-1.8, 3.024, -0.915],
+        [-1.8, 3.024, -1.22],
+        [-1.8, 3.198, -1.22],
+        [-1.8, 3.198, -1.525],
+        [-1.8, 3.372, -1.525],
+        [-1.8, 3.372, -1.83],
+        [-1.8, 3.546, -1.83],
+        [-1.8, 3.546, -2.135],
+        [-1.8, 3.72, -2.135]
+      ],
+      "duration_ms": 9911
+    },
+    {
+      "id": "stairs-second-back",
+      "from_room_id": "landing-second",
+      "to_room_id": "stairs-ground",
+      "points": [
+        [-1.8, 3.72, -2.135],
+        [-1.8, 3.546, -2.135],
+        [-1.8, 3.546, -1.83],
+        [-1.8, 3.372, -1.83],
+        [-1.8, 3.372, -1.525],
+        [-1.8, 3.198, -1.525],
+        [-1.8, 3.198, -1.22],
+        [-1.8, 3.024, -1.22],
+        [-1.8, 3.024, -0.915],
+        [-1.8, 2.85, -0.915],
+        [-1.8, 2.85, -0.61],
+        [-1.8, 2.676, -0.61],
+        [-1.8, 2.676, -0.305],
+        [-1.8, 2.502, -0.305],
+        [-1.8, 2.502, 0.0],
+        [-1.8, 2.328, 0.0],
+        [-1.8, 2.328, 0.305],
+        [-1.8, 2.154, 0.305],
+        [-1.8, 2.154, 0.61],
+        [-1.8, 1.98, 0.61],
+        [-1.8, 1.98, 0.915],
+        [-1.8, 1.806, 0.915],
+        [-1.8, 1.806, 1.22],
+        [-1.8, 1.632, 1.22],
+        [-1.8, 1.632, 1.525],
+        [-1.8, 1.458, 1.525],
+        [-1.8, 1.458, 1.83],
+        [-1.8, 1.284, 1.83],
+        [-1.8, 1.284, 2.135],
+        [-1.8, 1.11, 2.135],
+        [-1.8, 1.11, 2.44],
+        [-1.8, 0.936, 2.44],
+        [-1.8, 0.936, 2.745],
+        [-1.8, 0.762, 2.745],
+        [-1.8, 0.762, 3.05],
+        [-1.8, 0.588, 3.05],
+        [-1.8, 0.588, 3.355],
+        [-1.8, 0.414, 3.355],
+        [-1.8, 0.414, 3.66],
+        [-1.8, 0.21, 3.66]
+      ],
+      "duration_ms": 9911
+    },
+    {
+      "id": "second-hall-out",
+      "from_room_id": "landing-second",
+      "to_room_id": "hall-second",
+      "points": [
+        [-0.78, 3.72, -2.74],
+        [-0.51, 3.72, -2.8]
+      ],
+      "duration_ms": 8051
+    },
+    {
+      "id": "second-hall-back",
+      "from_room_id": "hall-second",
+      "to_room_id": "landing-second",
+      "points": [
+        [-0.51, 3.72, -2.8],
+        [-0.78, 3.72, -2.74]
+      ],
+      "duration_ms": 8051
+    },
+    {
+      "id": "second-attic-out",
+      "from_room_id": "landing-second",
+      "to_room_id": "stairs-attic",
+      "points": [
+        [-0.78, 3.72, -2.74],
+        [-0.45, 3.72, -3.27],
+        [0.75, 3.72, -3.29],
+        [1.32, 3.72, -3.29],
+        [2.44, 3.72, -2.96],
+        [3.15, 3.72, -2.95],
+        [3.45, 3.72, -2.96],
+        [4.48, 3.72, -3.24]
+      ],
+      "duration_ms": 6325
+    },
+    {
+      "id": "second-attic-back",
+      "from_room_id": "stairs-attic",
+      "to_room_id": "landing-second",
+      "points": [
+        [4.48, 3.72, -3.24],
+        [3.45, 3.72, -2.96],
+        [3.15, 3.72, -2.95],
+        [2.44, 3.72, -2.96],
+        [1.32, 3.72, -3.29],
+        [0.75, 3.72, -3.29],
+        [-0.45, 3.72, -3.27],
+        [-0.78, 3.72, -2.74]
+      ],
+      "duration_ms": 6325
+    },
+    {
+      "id": "stairs-third-out",
+      "from_room_id": "stairs-attic",
+      "to_room_id": "landing-attic",
+      "points": [
+        [4.88, 3.72, -3.38],
+        [4.88, 3.92, -3.38],
+        [5.145, 3.92, -3.38],
+        [5.145, 4.12, -3.38],
+        [5.41, 4.12, -3.38],
+        [5.41, 4.32, -3.38],
+        [5.675, 4.32, -3.38],
+        [5.675, 4.52, -3.38],
+        [5.94, 4.52, -3.38],
+        [5.94, 4.72, -3.38],
+        [6.205, 4.72, -3.38],
+        [6.205, 4.92, -3.38],
+        [6.47, 4.92, -3.38],
+        [6.47, 5.12, -3.38],
+        [6.735, 5.12, -3.38],
+        [6.735, 5.32, -3.38],
+        [7.0, 5.32, -3.38],
+        [7.0, 5.52, -3.38],
+        [7.265, 5.52, -3.38],
+        [7.265, 5.72, -3.38],
+        [7.53, 5.72, -3.38],
+        [7.53, 5.92, -3.38],
+        [7.795, 5.92, -3.38],
+        [7.795, 6.12, -3.38],
+        [8.06, 6.12, -3.38],
+        [8.06, 6.32, -3.38],
+        [8.325, 6.32, -3.38],
+        [8.325, 6.52, -3.38],
+        [8.59, 6.52, -3.38],
+        [8.59, 6.72, -3.38],
+        [8.855, 6.72, -3.38],
+        [8.855, 6.92, -3.38],
+        [9.12, 6.92, -3.38],
+        [9.12, 7.12, -3.38],
+        [9.28, 7.25, -3.38],
+        [9.46, 7.25, -2.77],
+        [9.53, 7.25, -2.05]
+      ],
+      "duration_ms": 9678
+    },
+    {
+      "id": "stairs-third-back",
+      "from_room_id": "landing-attic",
+      "to_room_id": "stairs-attic",
+      "points": [
+        [9.53, 7.25, -2.05],
+        [9.46, 7.25, -2.77],
+        [9.28, 7.25, -3.38],
+        [9.12, 7.12, -3.38],
+        [9.12, 6.92, -3.38],
+        [8.855, 6.92, -3.38],
+        [8.855, 6.72, -3.38],
+        [8.59, 6.72, -3.38],
+        [8.59, 6.52, -3.38],
+        [8.325, 6.52, -3.38],
+        [8.325, 6.32, -3.38],
+        [8.06, 6.32, -3.38],
+        [8.06, 6.12, -3.38],
+        [7.795, 6.12, -3.38],
+        [7.795, 5.92, -3.38],
+        [7.53, 5.92, -3.38],
+        [7.53, 5.72, -3.38],
+        [7.265, 5.72, -3.38],
+        [7.265, 5.52, -3.38],
+        [7.0, 5.52, -3.38],
+        [7.0, 5.32, -3.38],
+        [6.735, 5.32, -3.38],
+        [6.735, 5.12, -3.38],
+        [6.47, 5.12, -3.38],
+        [6.47, 4.92, -3.38],
+        [6.205, 4.92, -3.38],
+        [6.205, 4.72, -3.38],
+        [5.94, 4.72, -3.38],
+        [5.94, 4.52, -3.38],
+        [5.675, 4.52, -3.38],
+        [5.675, 4.32, -3.38],
+        [5.41, 4.32, -3.38],
+        [5.41, 4.12, -3.38],
+        [5.145, 4.12, -3.38],
+        [5.145, 3.92, -3.38],
+        [4.88, 3.92, -3.38],
+        [4.88, 3.72, -3.38]
+      ],
+      "duration_ms": 9678
+    },
+    {
+      "id": "attic-hall-out",
+      "from_room_id": "landing-attic",
+      "to_room_id": "hall-attic",
+      "points": [
+        [9.42, 7.25, 0.63]
+      ],
+      "duration_ms": 2332
+    },
+    {
+      "id": "attic-hall-back",
+      "from_room_id": "hall-attic",
+      "to_room_id": "landing-attic",
+      "points": [
+        [9.42, 7.25, 0.63]
+      ],
+      "duration_ms": 2332
+    },
+    {
+      "id": "attic-nook-out",
+      "from_room_id": "landing-attic",
+      "to_room_id": "attic-window",
+      "points": [
+        [9.35, 7.25, -0.46]
+      ],
+      "duration_ms": 620
+    },
+    {
+      "id": "attic-nook-back",
+      "from_room_id": "attic-window",
+      "to_room_id": "landing-attic",
+      "points": [
+        [9.35, 7.25, -0.46]
+      ],
+      "duration_ms": 620
+    },
+    {
+      "id": "door-upper-room-2-1-out",
+      "from_room_id": "hall-second",
+      "to_room_id": "upper-room-2-1",
+      "points": [
+        [-9, 3.72, 4.92],
+        [-9, 3.72, 3.75],
+        [-9.16, 3.72, 3.54]
+      ],
+      "duration_ms": 10611
+    },
+    {
+      "id": "door-upper-room-2-1-back",
+      "from_room_id": "upper-room-2-1",
+      "to_room_id": "hall-second",
+      "points": [
+        [-9.16, 3.72, 3.54],
+        [-9, 3.72, 3.75],
+        [-9, 3.72, 4.92]
+      ],
+      "duration_ms": 10611
+    },
+    {
+      "id": "door-upper-room-2-2-out",
+      "from_room_id": "hall-second",
+      "to_room_id": "upper-room-2-2",
+      "points": [
+        [-3, 3.72, 4.92],
+        [-3, 3.72, 3.95],
+        [-3.43, 3.72, 3.62],
+        [-3.57, 3.72, 2.78]
+      ],
+      "duration_ms": 4823
+    },
+    {
+      "id": "door-upper-room-2-2-back",
+      "from_room_id": "upper-room-2-2",
+      "to_room_id": "hall-second",
+      "points": [
+        [-3.57, 3.72, 2.78],
+        [-3.43, 3.72, 3.62],
+        [-3, 3.72, 3.95],
+        [-3, 3.72, 4.92]
+      ],
+      "duration_ms": 4823
+    },
+    {
+      "id": "door-upper-room-2-3-out",
+      "from_room_id": "hall-second",
+      "to_room_id": "upper-room-2-3",
+      "points": [
+        [3, 3.72, 4.92],
+        [3, 3.72, 3.54],
+        [2.35, 3.72, 3.4]
+      ],
+      "duration_ms": 6745
+    },
+    {
+      "id": "door-upper-room-2-3-back",
+      "from_room_id": "upper-room-2-3",
+      "to_room_id": "hall-second",
+      "points": [
+        [2.35, 3.72, 3.4],
+        [3, 3.72, 3.54],
+        [3, 3.72, 4.92]
+      ],
+      "duration_ms": 6745
+    },
+    {
+      "id": "door-upper-room-2-4-out",
+      "from_room_id": "hall-second",
+      "to_room_id": "upper-room-2-4",
+      "points": [
+        [9, 3.72, 4.92],
+        [9, 3.72, 3.64],
+        [9, 3.72, 2.85],
+        [9.24, 3.72, 2.55]
+      ],
+      "duration_ms": 11218
+    },
+    {
+      "id": "door-upper-room-2-4-back",
+      "from_room_id": "upper-room-2-4",
+      "to_room_id": "hall-second",
+      "points": [
+        [9.24, 3.72, 2.55],
+        [9, 3.72, 2.85],
+        [9, 3.72, 3.64],
+        [9, 3.72, 4.92]
+      ],
+      "duration_ms": 11218
+    },
+    {
+      "id": "door-upper-room-3-1-out",
+      "from_room_id": "hall-attic",
+      "to_room_id": "upper-room-3-1",
+      "points": [
+        [-8.07, 7.25, 1.9]
+      ],
+      "duration_ms": 15884
+    },
+    {
+      "id": "door-upper-room-3-1-back",
+      "from_room_id": "upper-room-3-1",
+      "to_room_id": "hall-attic",
+      "points": [
+        [-8.07, 7.25, 1.9]
+      ],
+      "duration_ms": 15884
+    },
+    {
+      "id": "door-upper-room-3-2-out",
+      "from_room_id": "hall-attic",
+      "to_room_id": "upper-room-3-2",
+      "points": [
+        [-1.395, 7.25, 1.9]
+      ],
+      "duration_ms": 9790
+    },
+    {
+      "id": "door-upper-room-3-2-back",
+      "from_room_id": "upper-room-3-2",
+      "to_room_id": "hall-attic",
+      "points": [
+        [-1.395, 7.25, 1.9]
+      ],
+      "duration_ms": 9790
+    },
+    {
+      "id": "door-upper-room-3-3-out",
+      "from_room_id": "hall-attic",
+      "to_room_id": "upper-room-3-3",
+      "points": [
+        [4.915, 7.25, 1.9],
+        [4.915, 7.25, 1.45],
+        [5.24, 7.25, 0.85]
+      ],
+      "duration_ms": 4801
+    },
+    {
+      "id": "door-upper-room-3-3-back",
+      "from_room_id": "upper-room-3-3",
+      "to_room_id": "hall-attic",
+      "points": [
+        [5.24, 7.25, 0.85],
+        [4.915, 7.25, 1.45],
+        [4.915, 7.25, 1.9]
+      ],
+      "duration_ms": 4801
+    }
+  ],
+  "private_rooms": {
+    "mio": "upper-room-2-1",
+    "shiro": "upper-room-2-2",
+    "kuro": "upper-room-2-3",
+    "midori": "upper-room-2-4",
+    "aka": "upper-room-3-1",
+    "ao": "upper-room-3-2",
+    "kin": "upper-room-3-3",
+    "gin": "attic-window"
+  },
+  "slots": [
+    {
+      "id": "bed-mio",
+      "kind": "bed",
+      "actor_id": "mio",
+      "room_id": "upper-room-2-1",
+      "anchor": [-10.65, 4.41, -1],
+      "approach_points": [
+        [-9.4, 3.72, 1.37],
+        [-10.65, 3.72, 0.89],
+        [-10.65, 3.72, 0.72],
+        [-10.65, 4.41, 0.72]
+      ],
+      "approach_duration_ms": 3784
+    },
+    {
+      "id": "bed-shiro",
+      "kind": "bed",
+      "actor_id": "shiro",
+      "room_id": "upper-room-2-2",
+      "anchor": [-4.7, 4.41, -1],
+      "approach_points": [
+        [-4.4, 3.72, 2.44],
+        [-4.7, 3.72, 0.72],
+        [-4.7, 4.41, 0.72]
+      ],
+      "approach_duration_ms": 4033
+    },
+    {
+      "id": "bed-kuro",
+      "kind": "bed",
+      "actor_id": "kuro",
+      "room_id": "upper-room-2-3",
+      "anchor": [1.55, 4.41, -1],
+      "approach_points": [
+        [1.55, 3.72, 0.78],
+        [1.55, 4.41, 0.78]
+      ],
+      "approach_duration_ms": 3109
+    },
+    {
+      "id": "bed-midori",
+      "kind": "bed",
+      "actor_id": "midori",
+      "room_id": "upper-room-2-4",
+      "anchor": [10.5, 4.41, -0.4],
+      "approach_points": [
+        [10.5, 3.72, 1.5],
+        [10.5, 3.72, 1.4],
+        [10.5, 4.41, 1.4]
+      ],
+      "approach_duration_ms": 3418
+    },
+    {
+      "id": "bed-aka",
+      "kind": "bed",
+      "actor_id": "aka",
+      "room_id": "upper-room-3-1",
+      "anchor": [-9, 8.12, -1.05],
+      "approach_points": [
+        [-9, 7.25, 0.66],
+        [-9, 8.12, 0.66]
+      ],
+      "approach_duration_ms": 3136
+    },
+    {
+      "id": "bed-ao",
+      "kind": "bed",
+      "actor_id": "ao",
+      "room_id": "upper-room-3-2",
+      "anchor": [-2.95, 7.71, -0.09],
+      "approach_points": [
+        [-1.7, 7.25, 0.77],
+        [-1.65, 7.71, 0.2],
+        [-1.89, 7.71, 0.17]
+      ],
+      "approach_duration_ms": 2135
+    },
+    {
+      "id": "bed-kin",
+      "kind": "bed",
+      "actor_id": "kin",
+      "room_id": "upper-room-3-3",
+      "anchor": [2.78, 7.675, -0.05],
+      "approach_points": [
+        [4.94, 7.25, 0.2],
+        [4.94, 7.675, 0.2],
+        [4.18, 7.675, 0.2]
+      ],
+      "approach_duration_ms": 2598
+    },
+    {
+      "id": "bed-gin",
+      "kind": "bed",
+      "actor_id": "gin",
+      "room_id": "attic-window",
+      "anchor": [7.56, 7.71, -1.54],
+      "approach_points": [
+        [8.25, 7.25, -0.57],
+        [7.56, 7.25, -0.6],
+        [7.56, 7.71, -0.6]
+      ],
+      "approach_duration_ms": 2495
+    },
+    {
+      "id": "shiro-exercise",
+      "kind": "exercise",
+      "actor_id": "shiro",
+      "room_id": "upper-room-2-2",
+      "anchor": [-4.47, 3.784, 2.47],
+      "approach_points": [
+        [-4.22, 3.784, 2.58]
+      ],
+      "approach_duration_ms": 500,
+      "duration_ms": 24000
+    },
+    {
+      "id": "kuro-mirror",
+      "kind": "mirror",
+      "actor_id": "kuro",
+      "room_id": "upper-room-2-3",
+      "anchor": [4.4, 3.72, -1.37],
+      "approach_points": [
+        [3.15, 3.72, 0.4],
+        [3.15, 3.72, -1.35]
+      ],
+      "approach_duration_ms": 3822
+    },
+    {"id": "desk-mio", "room_id": "living", "kind": "rest", "anchor": [-11.07, 0.21, 2.92], "approach_points": [[0.64, 0.21, 3.95], [0.24, 0.21, 4.33], [0.16, 0.21, 4.62], [-0.45, 0.21, 4.83], [-3.55, 0.21, 4.65], [-11.07, 0.21, 4.16], [-11.07, 0.21, 3.63]], "approach_duration_ms": 12613, "actor_id": "mio"},
+    {"id": "desk-shiro", "room_id": "living", "kind": "rest", "anchor": [-9.03, 0.21, 2.92], "approach_points": [[0.64, 0.21, 3.95], [0.24, 0.21, 4.33], [0.16, 0.21, 4.62], [-0.45, 0.21, 4.83], [-3.55, 0.21, 4.65], [-9.03, 0.21, 4.16], [-9.03, 0.21, 3.63]], "approach_duration_ms": 10782, "actor_id": "shiro"},
+    {"id": "desk-kuro", "room_id": "living", "kind": "rest", "anchor": [-7.17, 0.21, 2.92], "approach_points": [[0.64, 0.21, 3.95], [0.24, 0.21, 4.33], [0.16, 0.21, 4.62], [-0.45, 0.21, 4.83], [-3.55, 0.21, 4.65], [-7.17, 0.21, 4.16], [-7.17, 0.21, 3.63]], "approach_duration_ms": 9118, "actor_id": "kuro"},
+    {"id": "desk-midori", "room_id": "living", "kind": "rest", "anchor": [-5.13, 0.21, 2.92], "approach_points": [[0.64, 0.21, 3.95], [0.24, 0.21, 4.33], [0.16, 0.21, 4.62], [-0.45, 0.21, 4.83], [-3.55, 0.21, 4.65], [-5.13, 0.21, 4.16], [-5.13, 0.21, 3.63]], "approach_duration_ms": 7319, "actor_id": "midori"},
+    {"id": "desk-aka", "room_id": "living", "kind": "rest", "anchor": [-11.07, 0.21, -0.68], "approach_points": [[0.64, 0.21, 3.95], [0.24, 0.21, 4.33], [0.16, 0.21, 4.62], [-0.45, 0.21, 4.83], [-3.55, 0.21, 4.65], [-3.55, 0.21, 0.36], [-11.07, 0.21, 0.36], [-11.07, 0.21, 0.03]], "approach_duration_ms": 16279, "actor_id": "aka"},
+    {"id": "desk-ao", "room_id": "living", "kind": "rest", "anchor": [-9.03, 0.21, -0.68], "approach_points": [[0.64, 0.21, 3.95], [0.24, 0.21, 4.33], [0.16, 0.21, 4.62], [-0.45, 0.21, 4.83], [-3.55, 0.21, 4.65], [-3.55, 0.21, 0.36], [-9.03, 0.21, 0.36], [-9.03, 0.21, 0.03]], "approach_duration_ms": 14443, "actor_id": "ao"},
+    {"id": "desk-kin", "room_id": "living", "kind": "rest", "anchor": [-6.87, 0.21, -0.68], "approach_points": [[0.64, 0.21, 3.95], [0.24, 0.21, 4.33], [0.16, 0.21, 4.62], [-0.45, 0.21, 4.83], [-3.55, 0.21, 4.65], [-3.55, 0.21, 0.36], [-6.87, 0.21, 0.36], [-6.87, 0.21, 0.03]], "approach_duration_ms": 12499, "actor_id": "kin"},
+    {"id": "desk-gin", "room_id": "living", "kind": "rest", "anchor": [-4.83, 0.21, -0.68], "approach_points": [[0.64, 0.21, 3.95], [0.24, 0.21, 4.33], [0.16, 0.21, 4.62], [-0.45, 0.21, 4.83], [-3.55, 0.21, 4.65], [-3.55, 0.21, 0.36], [-4.83, 0.21, 0.36], [-4.83, 0.21, 0.03]], "approach_duration_ms": 10663, "actor_id": "gin"},
+    {"id": "sofa", "room_id": "living", "kind": "rest", "anchor": [3.05, 0.21, 0.09], "approach_points": [[3.05, 0.21, 3.27], [3.05, 0.21, 0.86]], "approach_duration_ms": 4562},
+    {"id": "sofa-guest", "room_id": "living", "kind": "rest", "anchor": [4.67, 0.21, 0.09], "approach_points": [[4.67, 0.21, 3.27], [4.67, 0.21, 0.86]], "approach_duration_ms": 6004},
+    {"id": "dining", "room_id": "dining", "kind": "rest", "anchor": [10.1, 0.21, 0.85], "approach_points": [[11.17, 0.21, 3.36], [11.17, 0.21, 0.85], [10.74, 0.21, 0.85]], "approach_duration_ms": 3737},
+    {"id": "dining-guest", "room_id": "dining", "kind": "rest", "anchor": [7.98, 0.21, 0.85], "approach_points": [[7.34, 0.21, 3.36], [7.34, 0.21, 0.85]], "approach_duration_ms": 5822}
+  ],
+  "mirror_poses": {
+    "kuro": [
+      {
+        "id": "mirror-greeting",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 3500
+      },
+      {
+        "id": "mirror-hero",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 3900
+      },
+      {
+        "id": "mirror-side",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 4300
+      },
+      {
+        "id": "mirror-focus",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 4700
+      },
+      {
+        "id": "mirror-hands-on-hips",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 5100
+      },
+      {
+        "id": "mirror-over-shoulder",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 5500
+      },
+      {
+        "id": "mirror-open-arms",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 5900
+      },
+      {
+        "id": "mirror-bow",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 6300
+      }
+    ]
+  }
+}

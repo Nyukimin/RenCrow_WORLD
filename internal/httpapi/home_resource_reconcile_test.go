@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,8 +17,16 @@ import (
 
 const homeResourceLifeToken = "home-resource-life-token"
 
-func resourceReconcileLayout(paths string, sceneByte byte) string {
-	return `{"schema_version":"world.home-layout/v1","scene_sha256":"` + strings.Repeat(string(sceneByte), 64) + `","room_anchors":{"lobby":[0,0,0],"hall":[5,0,0],"aka-room":[10,0,0],"ao-room":[20,0,0],"kin-room":[30,0,0]},"paths":[` + paths + `],"private_rooms":{"aka":"aka-room","ao":"ao-room","kin":"kin-room"},"slots":[{"id":"bed-aka","kind":"bed","actor_id":"aka","room_id":"aka-room","anchor":[10,0,0]},{"id":"bed-ao","kind":"bed","actor_id":"ao","room_id":"ao-room","anchor":[20,0,0]},{"id":"bed-kin","kind":"bed","actor_id":"kin","room_id":"kin-room","anchor":[30,0,0]}]}`
+func resourceReconcileLayout(paths string, sceneByte byte, restSlotIDs ...string) string {
+	slots := []string{
+		`{"id":"bed-aka","kind":"bed","actor_id":"aka","room_id":"aka-room","anchor":[10,0,0]}`,
+		`{"id":"bed-ao","kind":"bed","actor_id":"ao","room_id":"ao-room","anchor":[20,0,0]}`,
+		`{"id":"bed-kin","kind":"bed","actor_id":"kin","room_id":"kin-room","anchor":[30,0,0]}`,
+	}
+	for index, id := range restSlotIDs {
+		slots = append(slots, fmt.Sprintf(`{"id":%q,"kind":"rest","room_id":"lobby","anchor":[0,0,%d],"approach_points":[[0,0,0]],"approach_duration_ms":1000}`, id, index+1))
+	}
+	return `{"schema_version":"world.home-layout/v1","scene_sha256":"` + strings.Repeat(string(sceneByte), 64) + `","room_anchors":{"lobby":[0,0,0],"hall":[5,0,0],"aka-room":[10,0,0],"ao-room":[20,0,0],"kin-room":[30,0,0]},"paths":[` + paths + `],"private_rooms":{"aka":"aka-room","ao":"ao-room","kin":"kin-room"},"slots":[` + strings.Join(slots, ",") + `]}`
 }
 
 func resourceReconcileConfig(t *testing.T, dir, layoutPath string) Config {
@@ -48,7 +57,10 @@ func TestHomeResourceReconcileAddsNewLayoutResourcesToPersistedTimeline(t *testi
 	layoutPath := filepath.Join(dir, "home-layout.json")
 	oldPaths := `{"id":"lobby-hall","from_room_id":"lobby","to_room_id":"hall","points":[[2,0,0]],"duration_ms":1000}`
 	newPaths := oldPaths + `,{"id":"lobby-aka","from_room_id":"lobby","to_room_id":"aka-room","points":[[4,0,0]],"duration_ms":1000},{"id":"lobby-ao","from_room_id":"lobby","to_room_id":"ao-room","points":[[8,0,0]],"duration_ms":1000},{"id":"lobby-kin","from_room_id":"lobby","to_room_id":"kin-room","points":[[12,0,0]],"duration_ms":1000}`
-	writeResourceReconcileLayout(t, layoutPath, resourceReconcileLayout(oldPaths, 'a'))
+	existingSeatIDs := []string{"sofa", "sofa-guest", "dining", "dining-guest"}
+	addedSeatIDs := []string{"dining-aisle-north", "dining-aisle-south", "dining-window-north", "dining-window-south"}
+	expandedSeatIDs := append(append([]string(nil), existingSeatIDs...), addedSeatIDs...)
+	writeResourceReconcileLayout(t, layoutPath, resourceReconcileLayout(oldPaths, 'a', existingSeatIDs...))
 	cfg := resourceReconcileConfig(t, dir, layoutPath)
 
 	first, err := New(cfg)
@@ -96,7 +108,7 @@ func TestHomeResourceReconcileAddsNewLayoutResourcesToPersistedTimeline(t *testi
 		t.Fatalf("close original server: %v", err)
 	}
 
-	writeResourceReconcileLayout(t, layoutPath, resourceReconcileLayout(newPaths, 'b'))
+	writeResourceReconcileLayout(t, layoutPath, resourceReconcileLayout(newPaths, 'b', expandedSeatIDs...))
 	cfg.InitialState = nil
 	second, err := New(cfg)
 	if err != nil {
@@ -119,8 +131,14 @@ func TestHomeResourceReconcileAddsNewLayoutResourcesToPersistedTimeline(t *testi
 			t.Fatalf("configured resource %q = %+v, want capacity %d", id, got, capacity)
 		}
 	}
-	if len(added) != 3 {
-		t.Fatalf("added configured path resources=%v, want three", added)
+	if len(added) != 7 {
+		t.Fatalf("added configured path and seat resources=%v, want three routes plus four new chairs", added)
+	}
+	for _, id := range addedSeatIDs {
+		resourceID := "home-slot:" + id
+		if added[resourceID] != 1 {
+			t.Fatalf("new dining chair resource %q = %d, want capacity 1 in the reconciliation event", resourceID, added[resourceID])
+		}
 	}
 	for actorID, actor := range before.Actors {
 		if !reflect.DeepEqual(state.Actors[actorID], actor) {

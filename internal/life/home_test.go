@@ -3,6 +3,7 @@ package life
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -249,6 +250,73 @@ func TestHomeMovesReserveTheirTargetSlot(t *testing.T) {
 	}
 }
 
+func TestHomeOccupiedSeatRemainsExclusiveUntilDepartureCompletes(t *testing.T) {
+	now := time.Date(2026, 11, 14, 1, 18, 0, 0, time.UTC)
+	layout := sampleHomeLayout()
+	layout.Paths = append(layout.Paths, HomePath{
+		ID: "exercise-lounge", FromRoomID: "exercise", ToRoomID: "lounge", Points: []Vec3{{30, 0, 0}}, DurationMS: 1000,
+	})
+	st, _ := homeTestStore(t, layout, map[string]store.ActorState{
+		"kuro":  homeActorAt("living", Vec3{0, 0, 0}, ""),
+		"shiro": homeActorAt("exercise", Vec3{20, 0, 0}, ""),
+	}, &now)
+
+	first := appendHome(t, st, now, "occupied-seat-first", ActionHomeMove, `{"actor_id":"kuro","room_id":"lounge","slot_id":"sofa"}`)
+	if first.Receipt.Status != "committed" {
+		t.Fatalf("start first move: %+v", first.Receipt)
+	}
+	second := appendHome(t, st, now, "occupied-seat-second", ActionHomeMove, `{"actor_id":"shiro","room_id":"lounge","slot_id":"sofa"}`)
+	if second.Receipt.Status != "rejected" {
+		t.Fatalf("seat reservation accepted a parallel move: %+v", second.Receipt)
+	}
+
+	finishKuroMove := func(key string) {
+		t.Helper()
+		now = now.Add(time.Minute)
+		activityID := homeSnapshot(t, st).Actors["kuro"].ActivityID
+		result := appendHome(t, st, now, key, ActionHomeFinish,
+			fmt.Sprintf(`{"actor_id":"kuro","activity_id":%q}`, activityID))
+		if result.Receipt.Status != "committed" {
+			t.Fatalf("finish Kuro move: %+v", result.Receipt)
+		}
+	}
+	assertSeatUnavailable := func(key string) {
+		t.Helper()
+		result := appendHome(t, st, now, key, ActionHomeMove, `{"actor_id":"shiro","room_id":"lounge","slot_id":"sofa"}`)
+		shiro := homeSnapshot(t, st).Actors["shiro"]
+		if result.Receipt.Status != "rejected" || shiro.RoomID != "exercise" || shiro.ActivityID != "" {
+			t.Fatalf("occupied seat accepted a second actor: receipt=%+v Shiro=%+v", result.Receipt, shiro)
+		}
+	}
+
+	finishKuroMove("occupied-seat-arrived")
+	kuro := homeSnapshot(t, st).Actors["kuro"]
+	if kuro.RoomID != "lounge" || kuro.SlotID != "sofa" {
+		t.Fatalf("confirmed seat occupancy = %+v", kuro)
+	}
+	assertSeatUnavailable("occupied-seat-after-arrival")
+
+	departure := appendHome(t, st, now, "occupied-seat-leave", ActionHomeMove, `{"actor_id":"kuro","room_id":"living"}`)
+	if departure.Receipt.Status != "committed" {
+		t.Fatalf("start departure: %+v", departure.Receipt)
+	}
+	kuro = homeSnapshot(t, st).Actors["kuro"]
+	if kuro.SlotID != "sofa" || kuro.ActivityID == "" {
+		t.Fatalf("seat was released before departure completed: %+v", kuro)
+	}
+	assertSeatUnavailable("occupied-seat-departure-pending")
+
+	finishKuroMove("occupied-seat-departed")
+	kuro = homeSnapshot(t, st).Actors["kuro"]
+	if kuro.RoomID != "living" || kuro.SlotID != "" || kuro.ActivityID != "" {
+		t.Fatalf("completed departure did not release the seat: %+v", kuro)
+	}
+	next := appendHome(t, st, now, "occupied-seat-next", ActionHomeMove, `{"actor_id":"shiro","room_id":"lounge","slot_id":"sofa"}`)
+	if next.Receipt.Status != "committed" {
+		t.Fatalf("vacated seat did not accept the next actor: %+v", next.Receipt)
+	}
+}
+
 func TestHouse105HomeLayoutLoadsWithDigestAndAllPrivateRoomsReachable(t *testing.T) {
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
@@ -259,7 +327,7 @@ func TestHouse105HomeLayoutLoadsWithDigestAndAllPrivateRoomsReachable(t *testing
 	if err != nil {
 		t.Fatalf("load checked house layout: %v", err)
 	}
-	if layout.SceneSHA256 != "602a80fee5ce300ecfd3bee8cb4b316f4b3c95a6fda207a14cc95e06aaac840e" || len(layout.RoomAnchors) != 16 || len(layout.Paths) != 30 || len(layout.Slots) != 10 || len(layout.MirrorPoses["kuro"]) != 8 {
+	if layout.SceneSHA256 != "602a80fee5ce300ecfd3bee8cb4b316f4b3c95a6fda207a14cc95e06aaac840e" || len(layout.RoomAnchors) != 16 || len(layout.Paths) != 30 || len(layout.Slots) != 18 || len(layout.MirrorPoses["kuro"]) != 8 {
 		t.Fatalf("house layout contract mismatch: digest=%q rooms=%d paths=%d slots=%d Kuro poses=%d", layout.SceneSHA256, len(layout.RoomAnchors), len(layout.Paths), len(layout.Slots), len(layout.MirrorPoses["kuro"]))
 	}
 	controller, err := NewHomeController(layout, nil)
@@ -473,5 +541,83 @@ func TestHomeStrictPayloadAndLayoutChangeStopsArrivalButAllowsSafeStop(t *testin
 	}
 	if err := decodeHomePayload(json.RawMessage(`{"actor_id":"kuro","room_id":"bedroom","room_id":"living"}`), new(homeMoveCommand)); !errors.Is(err, ErrHomePayload) {
 		t.Fatalf("duplicate payload key error = %v", err)
+	}
+}
+
+func TestHouse105HasEightDistinctPhysicalRestSlots(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot resolve test file path")
+	}
+	layoutPath := filepath.Join(filepath.Dir(thisFile), "..", "..", "examples", "house-105", "home-layout.json")
+	layout, err := LoadHomeLayout(layoutPath)
+	if err != nil {
+		t.Fatalf("load checked house layout: %v", err)
+	}
+	controller, err := NewHomeController(layout, nil)
+	if err != nil {
+		t.Fatalf("initialize checked house layout: %v", err)
+	}
+	type expectedSeat struct {
+		room       string
+		anchor     Vec3
+		approach   []Vec3
+		durationMS int64
+	}
+	expected := map[string]expectedSeat{
+		"sofa":                {"living", Vec3{3.05, 0.21, 0.09}, []Vec3{{3.05, 0.21, 3.27}, {3.05, 0.21, 0.86}}, 4562},
+		"sofa-guest":          {"living", Vec3{4.67, 0.21, 0.09}, []Vec3{{4.67, 0.21, 3.27}, {4.67, 0.21, 0.86}}, 6004},
+		"dining":              {"dining", Vec3{10.1, 0.21, 0.85}, []Vec3{{11.17, 0.21, 3.36}, {11.17, 0.21, 0.85}, {10.74, 0.21, 0.85}}, 3737},
+		"dining-guest":        {"dining", Vec3{7.98, 0.21, 0.85}, []Vec3{{7.34, 0.21, 3.36}, {7.34, 0.21, 0.85}}, 5822},
+		"dining-aisle-north":  {"dining", Vec3{7.98, 0.21, 2.15}, []Vec3{{7.34, 0.21, 3.36}, {7.34, 0.21, 2.15}}, 4652},
+		"dining-aisle-south":  {"dining", Vec3{7.98, 0.21, -0.48}, []Vec3{{7.34, 0.21, 3.36}, {7.34, 0.21, -0.48}}, 7020},
+		"dining-window-north": {"dining", Vec3{10.1, 0.21, 2.15}, []Vec3{{11.17, 0.21, 3.36}, {11.17, 0.21, 2.15}, {10.74, 0.21, 2.15}}, 2568},
+		"dining-window-south": {"dining", Vec3{10.1, 0.21, -0.48}, []Vec3{{11.17, 0.21, 3.36}, {11.17, 0.21, -0.48}, {10.74, 0.21, -0.48}}, 4930},
+	}
+	got := make(map[string]HomeSlot)
+	for _, slot := range layout.Slots {
+		if slot.Kind != HomeSlotRest {
+			continue
+		}
+		want, ok := expected[slot.ID]
+		if !ok {
+			t.Fatalf("unexpected rest slot %q; only sofa and dining-chair slots count", slot.ID)
+		}
+		if slot.RoomID != want.room || slot.ActorID != "" || slot.Anchor != want.anchor || slot.ApproachDurationMS != want.durationMS {
+			t.Fatalf("rest slot %q = %+v, want room=%s actor-unbound anchor=%v duration=%dms", slot.ID, slot, want.room, want.anchor, want.durationMS)
+		}
+		if len(slot.ApproachPoints) != len(want.approach) {
+			t.Fatalf("rest slot %q approach points=%v, want %v", slot.ID, slot.ApproachPoints, want.approach)
+		}
+		for i, point := range want.approach {
+			if slot.ApproachPoints[i] != point {
+				t.Fatalf("rest slot %q approach point %d=%v, want %v", slot.ID, i, slot.ApproachPoints[i], point)
+			}
+		}
+		from := [3]float64(layout.RoomAnchors[slot.RoomID])
+		route, err := controller.resolveRoute("mio", store.ActorState{RoomID: slot.RoomID, Position: &from}, slot.RoomID, slot.ID)
+		if err != nil || len(route.points) < 2 || route.points[len(route.points)-1] != slot.Anchor || route.durationMS != slot.ApproachDurationMS {
+			t.Fatalf("rest slot %q route=%+v err=%v, want exact anchor and measured in-room approach", slot.ID, route, err)
+		}
+		got[slot.ID] = slot
+	}
+	if len(got) != len(expected) {
+		t.Fatalf("physical rest slots=%d, want exactly %d sofa/chair slots", len(got), len(expected))
+	}
+	ids := make([]string, 0, len(expected))
+	for id := range expected {
+		if _, ok := got[id]; !ok {
+			t.Errorf("missing physical rest slot %q", id)
+		}
+		ids = append(ids, id)
+	}
+	for i := 0; i < len(ids); i++ {
+		for j := i + 1; j < len(ids); j++ {
+			a, b := got[ids[i]].Anchor, got[ids[j]].Anchor
+			dx, dz := a[0]-b[0], a[2]-b[2]
+			if dx*dx+dz*dz < 1.29*1.29 {
+				t.Errorf("rest seats %q and %q are too close: anchors=%v,%v", ids[i], ids[j], a, b)
+			}
+		}
 	}
 }

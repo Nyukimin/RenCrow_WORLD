@@ -624,6 +624,70 @@
         [3.15, 3.72, -1.35]
       ],
       "approach_duration_ms": 3822
+    },
+    {
+      "id": "sofa",
+      "kind": "rest",
+      "room_id": "living",
+      "anchor": [3.05, 0.21, 0.09],
+      "approach_points": [[3.05, 0.21, 3.27], [3.05, 0.21, 0.86]],
+      "approach_duration_ms": 4562
+    },
+    {
+      "id": "sofa-guest",
+      "kind": "rest",
+      "room_id": "living",
+      "anchor": [4.67, 0.21, 0.09],
+      "approach_points": [[4.67, 0.21, 3.27], [4.67, 0.21, 0.86]],
+      "approach_duration_ms": 6004
+    },
+    {
+      "id": "dining",
+      "kind": "rest",
+      "room_id": "dining",
+      "anchor": [10.1, 0.21, 0.85],
+      "approach_points": [[11.17, 0.21, 3.36], [11.17, 0.21, 0.85], [10.74, 0.21, 0.85]],
+      "approach_duration_ms": 3737
+    },
+    {
+      "id": "dining-guest",
+      "kind": "rest",
+      "room_id": "dining",
+      "anchor": [7.98, 0.21, 0.85],
+      "approach_points": [[7.34, 0.21, 3.36], [7.34, 0.21, 0.85]],
+      "approach_duration_ms": 5822
+    },
+    {
+      "id": "dining-aisle-north",
+      "kind": "rest",
+      "room_id": "dining",
+      "anchor": [7.98, 0.21, 2.15],
+      "approach_points": [[7.34, 0.21, 3.36], [7.34, 0.21, 2.15]],
+      "approach_duration_ms": 4652
+    },
+    {
+      "id": "dining-aisle-south",
+      "kind": "rest",
+      "room_id": "dining",
+      "anchor": [7.98, 0.21, -0.48],
+      "approach_points": [[7.34, 0.21, 3.36], [7.34, 0.21, -0.48]],
+      "approach_duration_ms": 7020
+    },
+    {
+      "id": "dining-window-north",
+      "kind": "rest",
+      "room_id": "dining",
+      "anchor": [10.1, 0.21, 2.15],
+      "approach_points": [[11.17, 0.21, 3.36], [11.17, 0.21, 2.15], [10.74, 0.21, 2.15]],
+      "approach_duration_ms": 2568
+    },
+    {
+      "id": "dining-window-south",
+      "kind": "rest",
+      "room_id": "dining",
+      "anchor": [10.1, 0.21, -0.48],
+      "approach_points": [[11.17, 0.21, 3.36], [11.17, 0.21, -0.48], [10.74, 0.21, -0.48]],
+      "approach_duration_ms": 4930
     }
   ],
   "mirror_poses": {
