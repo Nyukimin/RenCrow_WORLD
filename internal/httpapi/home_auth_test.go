@@ -8,12 +8,73 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Nyukimin/RenCrow_WORLD/internal/life"
 	"github.com/Nyukimin/RenCrow_WORLD/internal/store"
 )
 
 const lifeToken = "life-core-token-value"
+const visitToken = "world-home-visit-token-value"
+
+func TestVisitCredentialIsDedicatedAndCanOnlyAdmitOrDepartLumina(t *testing.T) {
+	dir := t.TempDir()
+	layoutPath := filepath.Join(dir, "home-layout.json")
+	layoutJSON := `{"schema_version":"world.home-layout/v1","scene_sha256":"` + strings.Repeat("a", 64) + `","room_anchors":{"dining":[10,0,0]},"paths":[],"private_rooms":{},"slots":[]}`
+	if err := os.WriteFile(layoutPath, []byte(layoutJSON), 0o600); err != nil {
+		t.Fatalf("write layout: %v", err)
+	}
+	cfg := baseConfig(t, dir)
+	cfg.HomeLayoutPath = layoutPath
+	cfg.Tokens = append(cfg.Tokens, TokenConfig{
+		ID: "living-visit-owner", SHA256: tokenHash(visitToken), Scopes: []string{"visit"},
+	})
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(func() {
+		ts.Close()
+		_ = s.Close()
+	})
+
+	admitBody := commandBody(t, life.ActionHomeVisitAdmit, map[string]any{
+		"actor_id": life.HomeVisitorID, "visit_id": "living-visit-1", "valid_until": nowUTC().Add(5 * time.Minute).Format(time.RFC3339Nano),
+	})
+	admitted := doRequest(t, http.MethodPost, commandsURL(ts), visitToken, "visit-admit-1", admitBody)
+	if admitted.StatusCode != http.StatusOK {
+		t.Fatalf("visit admission status=%d body=%s", admitted.StatusCode, readBody(t, admitted))
+	}
+	_ = admitted.Body.Close()
+
+	departBody := commandBody(t, life.ActionHomeVisitDepart, map[string]any{
+		"actor_id": life.HomeVisitorID, "visit_id": "living-visit-1",
+	})
+	denied := doRequest(t, http.MethodPost, commandsURL(ts), writerToken, "visit-depart-denied", departBody)
+	if denied.StatusCode != http.StatusForbidden {
+		t.Fatalf("write credential used visit action: status=%d body=%s", denied.StatusCode, readBody(t, denied))
+	}
+	_ = denied.Body.Close()
+	standard := doRequest(t, http.MethodPost, commandsURL(ts), visitToken, "visit-standard-denied",
+		commandBody(t, "debug.noop", map[string]any{"should": "be denied"}))
+	if standard.StatusCode != http.StatusForbidden {
+		t.Fatalf("visit credential used standard action: status=%d body=%s", standard.StatusCode, readBody(t, standard))
+	}
+	_ = standard.Body.Close()
+	departed := doRequest(t, http.MethodPost, commandsURL(ts), visitToken, "visit-depart-1", departBody)
+	if departed.StatusCode != http.StatusOK {
+		t.Fatalf("visit departure status=%d body=%s", departed.StatusCode, readBody(t, departed))
+	}
+	_ = departed.Body.Close()
+	state, _, _, err := s.store.Snapshot(cfg.Scope)
+	if err != nil {
+		t.Fatalf("snapshot after departure: %v", err)
+	}
+	if _, present := state.Actors[life.HomeVisitorID]; present {
+		t.Fatal("Lumina remained present after visit departure")
+	}
+}
 
 func TestHomeCommandsUseSeparateLifeCredentialActorScopeAndCanonicalReceipt(t *testing.T) {
 	dir := t.TempDir()
@@ -122,6 +183,13 @@ func TestLifeCredentialConfigurationRequiresExactActorListAndLayout(t *testing.T
 			cfg.HomeLayoutPath = filepath.Join(t.TempDir(), "layout.json")
 			cfg.Tokens = []TokenConfig{{ID: "life", SHA256: tokenHash(lifeToken), Scopes: []string{"life", "write"}, LifeActorIDs: []string{"kuro"}}}
 		},
+		"visit scope without layout": func(cfg *Config) {
+			cfg.Tokens = []TokenConfig{{ID: "visit", SHA256: tokenHash(visitToken), Scopes: []string{"visit"}}}
+		},
+		"visit scope must be dedicated": func(cfg *Config) {
+			cfg.HomeLayoutPath = filepath.Join(t.TempDir(), "layout.json")
+			cfg.Tokens = []TokenConfig{{ID: "visit", SHA256: tokenHash(visitToken), Scopes: []string{"visit", "write"}}}
+		},
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -131,6 +199,12 @@ func TestLifeCredentialConfigurationRequiresExactActorListAndLayout(t *testing.T
 				t.Fatal("invalid life credential configuration accepted")
 			}
 		})
+	}
+	validVisit := baseConfig(t, t.TempDir())
+	validVisit.HomeLayoutPath = filepath.Join(t.TempDir(), "layout.json")
+	validVisit.Tokens = append(validVisit.Tokens, TokenConfig{ID: "visit", SHA256: tokenHash(visitToken), Scopes: []string{"visit"}})
+	if _, err := NormalizeConfig(validVisit); err != nil {
+		t.Fatalf("dedicated visit credential with layout was rejected: %v", err)
 	}
 }
 

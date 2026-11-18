@@ -68,7 +68,15 @@ func (s *Server) handleCommand(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if life.IsHomeAction(req.Action) {
+	if req.Action == life.ActionHomeVisitAdmit || req.Action == life.ActionHomeVisitDepart {
+		if !principal.allows("visit") {
+			writeAPIError(w, http.StatusForbidden, "forbidden", "the credential does not allow home visitor admission")
+			return
+		}
+	} else if req.Action == life.ActionHomeVisitExpire {
+		writeAPIError(w, http.StatusForbidden, "forbidden", "visit expiration is internal")
+		return
+	} else if life.IsHomeAction(req.Action) {
 		if !principal.allows("life") {
 			writeAPIError(w, http.StatusForbidden, "forbidden", "the credential does not allow life commands")
 			return

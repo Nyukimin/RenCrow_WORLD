@@ -73,6 +73,8 @@ func (s Scope) valid() bool {
 }
 
 type ActorState struct {
+	VisitID               string      `json:"visit_id,omitempty"`
+	VisitUntil            string      `json:"visit_until,omitempty"`
 	RoomID                string      `json:"room_id"`
 	ActivityID            string      `json:"activity_id,omitempty"`
 	ActivityKind          string      `json:"activity_kind,omitempty"`

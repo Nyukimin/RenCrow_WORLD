@@ -20,6 +20,7 @@ const (
 )
 
 var validScopes = map[string]bool{
+	"visit":                true,
 	"read":                 true,
 	"write":                true,
 	"life":                 true,
@@ -188,6 +189,9 @@ func NormalizeConfig(cfg Config) (Config, error) {
 				hasLifeScope = true
 				needsHomeLayout = true
 			}
+			if s == "visit" {
+				needsHomeLayout = true
+			}
 		}
 		seenLifeActors := map[string]bool{}
 		for _, actorID := range t.LifeActorIDs {
@@ -201,6 +205,9 @@ func NormalizeConfig(cfg Config) (Config, error) {
 		}
 		if hasLifeScope && seenScopes["write"] {
 			return Config{}, fmt.Errorf("token %q cannot combine the life and write scopes", t.ID)
+		}
+		if seenScopes["visit"] && len(t.Scopes) != 1 {
+			return Config{}, fmt.Errorf("token %q must use a dedicated visit scope", t.ID)
 		}
 		if t.Scope != nil && !t.Scope.Valid() {
 			return Config{}, fmt.Errorf("token %q has an invalid bound scope", t.ID)

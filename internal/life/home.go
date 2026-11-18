@@ -453,6 +453,9 @@ func (c *HomeController) Register(st *store.Store) {
 	st.Register(ActionHomeReading, c.handleReading)
 	st.Register(ActionHomeFinish, c.handleFinish)
 	st.Register(ActionHomeStop, c.handleStop)
+	st.Register(ActionHomeVisitAdmit, c.handleVisitAdmit)
+	st.Register(ActionHomeVisitDepart, c.handleVisitDepart)
+	st.Register(ActionHomeVisitExpire, c.handleVisitExpire)
 }
 
 func IsHomeAction(action string) bool {

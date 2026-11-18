@@ -32,11 +32,12 @@ const (
 )
 
 type Server struct {
-	cfg     Config
-	store   *store.Store
-	home    *life.HomeController
-	handler http.Handler
-	tokens  []tokenEntry
+	cfg             Config
+	store           *store.Store
+	home            *life.HomeController
+	handler         http.Handler
+	tokens          []tokenEntry
+	stopVisitExpiry func()
 }
 
 type tokenEntry struct {
@@ -130,7 +131,7 @@ func New(cfg Config) (*Server, error) {
 		if state, _, _, err := st.Snapshot(cfg.Scope); err == nil {
 			for _, token := range cfg.Tokens {
 				for _, actorID := range token.LifeActorIDs {
-					if _, ok := state.Actors[actorID]; !ok {
+					if _, ok := state.Actors[actorID]; !ok && actorID != life.HomeVisitorID {
 						_ = st.Close()
 						return nil, fmt.Errorf("life actor %q must exist in the Timeline", actorID)
 					}
@@ -162,11 +163,19 @@ func New(cfg Config) (*Server, error) {
 		st.Register("debug.noop", probeHandler)
 	}
 	s.handler = securityHeaders(s.routes())
+	if home != nil {
+		s.stopVisitExpiry = s.startVisitExpiry()
+	}
 	return s, nil
 }
 
 func (s *Server) Handler() http.Handler { return s.handler }
-func (s *Server) Close() error          { return s.store.Close() }
+func (s *Server) Close() error {
+	if s.stopVisitExpiry != nil {
+		s.stopVisitExpiry()
+	}
+	return s.store.Close()
+}
 
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +241,7 @@ func (s *Server) auth(scope string, next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) commandAuth(next http.HandlerFunc) http.HandlerFunc {
 	return s.auth("", func(w http.ResponseWriter, r *http.Request) {
 		p, ok := r.Context().Value(principalContextKey{}).(principal)
-		if !ok || (!p.allows("write") && !p.allows("life")) {
+		if !ok || (!p.allows("write") && !p.allows("life") && !p.allows("visit")) {
 			writeAPIError(w, http.StatusForbidden, "forbidden", "the credential does not allow commands")
 			return
 		}
