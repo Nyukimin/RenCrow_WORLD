@@ -25,6 +25,8 @@ func sampleHomeLayout() HomeLayout {
 			"exercise": {20, 0, 0},
 			"mirror":   {30, 0, 0},
 			"lounge":   {40, 0, 0},
+			"fashion":  {50, 0, 0},
+			"reading":  {60, 0, 0},
 		},
 		Paths: []HomePath{
 			{ID: "living-bedroom", FromRoomID: "living", ToRoomID: "bedroom", Points: []Vec3{{5, 0, 1}}, DurationMS: 1000},
@@ -327,7 +329,7 @@ func TestHouse105HomeLayoutLoadsWithDigestAndAllPrivateRoomsReachable(t *testing
 	if err != nil {
 		t.Fatalf("load checked house layout: %v", err)
 	}
-	if layout.SceneSHA256 != "602a80fee5ce300ecfd3bee8cb4b316f4b3c95a6fda207a14cc95e06aaac840e" || len(layout.RoomAnchors) != 16 || len(layout.Paths) != 30 || len(layout.Slots) != 18 || len(layout.MirrorPoses["kuro"]) != 8 {
+	if layout.SceneSHA256 != "602a80fee5ce300ecfd3bee8cb4b316f4b3c95a6fda207a14cc95e06aaac840e" || len(layout.RoomAnchors) != 16 || len(layout.Paths) != 30 || len(layout.Slots) != 20 || len(layout.MirrorPoses["kuro"]) != 10 {
 		t.Fatalf("house layout contract mismatch: digest=%q rooms=%d paths=%d slots=%d Kuro poses=%d", layout.SceneSHA256, len(layout.RoomAnchors), len(layout.Paths), len(layout.Slots), len(layout.MirrorPoses["kuro"]))
 	}
 	controller, err := NewHomeController(layout, nil)
@@ -469,6 +471,168 @@ func TestHomeExerciseAndKuroPoseRequireExactSlotAndCountCompletionOnce(t *testin
 	retry := appendHome(t, st, now, "pose-finish", ActionHomeFinish, `{"actor_id":"kuro","activity_id":"`+activityID+`"}`)
 	if !retry.Duplicate || retry.Receipt.ID != completed.Receipt.ID || homeSnapshot(t, st).Actors["kuro"].MirrorPoseCompletions != 1 {
 		t.Fatalf("idempotent finish counted twice: duplicate=%v receipt=%s count=%d", retry.Duplicate, retry.Receipt.ID, homeSnapshot(t, st).Actors["kuro"].MirrorPoseCompletions)
+	}
+}
+
+func TestHomeFashionShowAndReadingUseActorOwnedSlotsAndSharedLifecycle(t *testing.T) {
+	now := time.Date(2026, 11, 17, 2, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name, actor, room, action, activity, started, completed string
+		position                                                Vec3
+	}{
+		{"fashion_show", "mio", "fashion", ActionHomeFashionShow, HomeActivityFashionShow, EventHomeFashionShowStarted, EventHomeFashionShowCompleted, Vec3{50, 0, 0}},
+		{"reading", "midori", "reading", ActionHomeReading, HomeActivityReading, EventHomeReadingStarted, EventHomeReadingCompleted, Vec3{60, 0, 0}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			layout := sampleHomeLayout()
+			layout.Slots = append(layout.Slots,
+				HomeSlot{ID: "mio-fashion", Kind: HomeSlotFashionShow, ActorID: "mio", RoomID: "fashion", Anchor: Vec3{50, 0, 0}, DurationMS: 4000},
+				HomeSlot{ID: "midori-reading", Kind: HomeSlotReading, ActorID: "midori", RoomID: "reading", Anchor: Vec3{60, 0, 0}, DurationMS: 4000},
+			)
+			filtered := layout.Slots[:0]
+			for _, slot := range layout.Slots {
+				if slot.Kind == HomeSlotFashionShow && tc.name != "fashion_show" || slot.Kind == HomeSlotReading && tc.name != "reading" {
+					continue
+				}
+				filtered = append(filtered, slot)
+			}
+			layout.Slots = filtered
+			st, _ := homeTestStore(t, layout, map[string]store.ActorState{
+				tc.actor: homeActorAt(tc.room, tc.position, map[string]string{"mio": "mio-fashion", "midori": "midori-reading"}[tc.actor]),
+			}, &now)
+			payload := `{"actor_id":"` + tc.actor + `"}`
+			if !IsHomeAction(tc.action) {
+				t.Fatalf("HTTP home-action allowlist excludes %q", tc.action)
+			}
+			if actorID, err := HomeCommandActorID(tc.action, json.RawMessage(payload)); err != nil || actorID != tc.actor {
+				t.Fatalf("HTTP actor scope = %q, %v", actorID, err)
+			}
+			badPayload := appendHome(t, st, now, "bad-"+tc.actor, tc.action, `{"actor_id":"`+tc.actor+`","duration_ms":1}`)
+			if badPayload.Receipt.Status != "rejected" {
+				t.Fatalf("caller supplied duration was accepted: %+v", badPayload.Receipt)
+			}
+			started := appendHome(t, st, now, "start-"+tc.actor, tc.action, payload)
+			if started.Receipt.Status != "committed" {
+				t.Fatalf("start: %+v", started.Receipt)
+			}
+			state := homeSnapshot(t, st)
+			actor := state.Actors[tc.actor]
+			if actor.ActivityKind != tc.activity || actor.ActivityStartedAt == "" || actor.ActivityDueAt == "" || actor.SlotID == "" {
+				t.Fatalf("persisted activity contract = %+v", actor)
+			}
+			kind, event := readHomeEvent(t, st, started.Receipt.LastSeq)
+			if kind != tc.started || event["actor_id"] != tc.actor || event["started_at"] == nil || event["due_at"] == nil {
+				t.Fatalf("started event = %s %v", kind, event)
+			}
+			activityID := actor.ActivityID
+			early := appendHome(t, st, now, "early-"+tc.actor, ActionHomeFinish, `{"actor_id":"`+tc.actor+`","activity_id":"`+activityID+`"}`)
+			if early.Receipt.Status != "rejected" {
+				t.Fatalf("early completion accepted: %+v", early.Receipt)
+			}
+			now = now.Add(4 * time.Second)
+			finished := appendHome(t, st, now, "finish-"+tc.actor, ActionHomeFinish, `{"actor_id":"`+tc.actor+`","activity_id":"`+activityID+`"}`)
+			if finished.Receipt.Status != "committed" {
+				t.Fatalf("completion: %+v", finished.Receipt)
+			}
+			kind, event = readHomeEvent(t, st, finished.Receipt.LastSeq)
+			if kind != tc.completed || event["actor_id"] != tc.actor || event["activity_id"] != activityID || event["elapsed_ms"] != float64(4000) {
+				t.Fatalf("completed event = %s %v", kind, event)
+			}
+			retry := appendHome(t, st, now, "finish-"+tc.actor, ActionHomeFinish, `{"actor_id":"`+tc.actor+`","activity_id":"`+activityID+`"}`)
+			if !retry.Duplicate || homeSnapshot(t, st).Actors[tc.actor].ActivityID != "" {
+				t.Fatalf("completion retry changed state: %+v", retry)
+			}
+			started = appendHome(t, st, now, "stop-start-"+tc.actor, tc.action, payload)
+			if started.Receipt.Status != "committed" {
+				t.Fatalf("second start for stop: %+v", started.Receipt)
+			}
+			activityID = homeSnapshot(t, st).Actors[tc.actor].ActivityID
+			stopped := appendHome(t, st, now, "stop-"+tc.actor, ActionHomeStop, `{"actor_id":"`+tc.actor+`","activity_id":"`+activityID+`"}`)
+			if stopped.Receipt.Status != "committed" {
+				t.Fatalf("safe stop: %+v", stopped.Receipt)
+			}
+			kind, event = readHomeEvent(t, st, stopped.Receipt.LastSeq)
+			if kind != EventHomeActivityStopped || event["activity_kind"] != tc.activity || homeSnapshot(t, st).Actors[tc.actor].ActivityID != "" {
+				t.Fatalf("stop result = %s %v state=%+v", kind, event, homeSnapshot(t, st).Actors[tc.actor])
+			}
+		})
+	}
+}
+
+func TestHomeExerciseStillAcceptsConfiguredSharedSlot(t *testing.T) {
+	now := time.Date(2026, 11, 17, 4, 0, 0, 0, time.UTC)
+	layout := sampleHomeLayout()
+	for i := range layout.Slots {
+		if layout.Slots[i].ID == "mat-shiro" {
+			layout.Slots[i].ActorID = ""
+		}
+	}
+	st, _ := homeTestStore(t, layout, map[string]store.ActorState{
+		"shiro": homeActorAt("exercise", Vec3{20, 0, 0}, "mat-shiro"),
+	}, &now)
+	started := appendHome(t, st, now, "shared-exercise", ActionHomeExercise, `{"actor_id":"shiro"}`)
+	if started.Receipt.Status != "committed" || homeSnapshot(t, st).Actors["shiro"].ActivityKind != HomeActivityExercise {
+		t.Fatalf("existing shared exercise slot contract changed: %+v", started.Receipt)
+	}
+}
+
+func TestHomeReadingFinishesAfterStoreReopen(t *testing.T) {
+	now := time.Date(2026, 11, 17, 6, 0, 0, 0, time.UTC)
+	dbPath := filepath.Join(t.TempDir(), "home.db")
+	layout := sampleHomeLayout()
+	layout.Slots = append(layout.Slots, HomeSlot{ID: "midori-reading", Kind: HomeSlotReading, ActorID: "midori", RoomID: "reading", Anchor: Vec3{60, 0, 0}, DurationMS: 4000})
+	controller, err := NewHomeController(layout, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewHomeController: %v", err)
+	}
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if err := st.CreateTimeline(homeScope, store.State{Actors: map[string]store.ActorState{
+		"midori": homeActorAt("reading", Vec3{60, 0, 0}, "midori-reading"),
+	}}, controller.ResourceCapacities()); err != nil {
+		t.Fatalf("CreateTimeline: %v", err)
+	}
+	controller.Register(st)
+	started := appendHome(t, st, now, "reading-before-reopen", ActionHomeReading, `{"actor_id":"midori"}`)
+	if started.Receipt.Status != "committed" {
+		t.Fatalf("start: %+v", started.Receipt)
+	}
+	activityID := homeSnapshot(t, st).Actors["midori"].ActivityID
+	if err := st.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	st, err = store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	controller, err = NewHomeController(layout, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("NewHomeController after reopen: %v", err)
+	}
+	controller.Register(st)
+	now = now.Add(4 * time.Second)
+	finished := appendHome(t, st, now, "reading-after-reopen", ActionHomeFinish, `{"actor_id":"midori","activity_id":"`+activityID+`"}`)
+	if finished.Receipt.Status != "committed" {
+		t.Fatalf("finish restored activity: %+v", finished.Receipt)
+	}
+	kind, event := readHomeEvent(t, st, finished.Receipt.LastSeq)
+	if kind != EventHomeReadingCompleted || event["activity_id"] != activityID {
+		t.Fatalf("restored completion event = %s %v", kind, event)
+	}
+}
+
+func TestHomeConfiguredHobbySlotsRequireOwnerAndDuration(t *testing.T) {
+	valid := `{"schema_version":"` + HomeLayoutSchemaVersion + `","scene_sha256":"` + strings.Repeat("a", 64) + `","room_anchors":{"living":[0,0,0]},"paths":[],"private_rooms":{},"slots":[{"id":"fashion","kind":"fashion_show","room_id":"living","anchor":[0,0,0],"duration_ms":1000}]}`
+	if _, err := ParseHomeLayout([]byte(valid)); err == nil {
+		t.Fatal("fashion slot without exact actor owner was accepted")
+	}
+	withoutDuration := strings.Replace(valid, `,"duration_ms":1000`, `,"actor_id":"mio"`, 1)
+	if _, err := ParseHomeLayout([]byte(withoutDuration)); err == nil {
+		t.Fatal("hobby slot without configured duration was accepted")
 	}
 }
 

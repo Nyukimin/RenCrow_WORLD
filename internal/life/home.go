@@ -25,39 +25,49 @@ const (
 	HomeActivitySleep       = "sleep"
 	HomeActivityExercise    = "exercise"
 	HomeActivityMirrorPose  = "mirror_pose"
+	HomeActivityFashionShow = "fashion_show"
+	HomeActivityReading     = "reading"
 
-	HomeSlotBed      = "bed"
-	HomeSlotExercise = "exercise"
-	HomeSlotMirror   = "mirror"
-	HomeSlotRest     = "rest"
+	HomeSlotBed         = "bed"
+	HomeSlotExercise    = "exercise"
+	HomeSlotMirror      = "mirror"
+	HomeSlotRest        = "rest"
+	HomeSlotFashionShow = "fashion_show"
+	HomeSlotReading     = "reading"
 
-	ActionHomeMove       = "life.home.move"
-	ActionHomeSleep      = "life.home.sleep"
-	ActionHomeWake       = "life.home.wake"
-	ActionHomeExercise   = "life.home.exercise"
-	ActionHomeMirrorPose = "life.home.mirror_pose"
-	ActionHomeFinish     = "life.home.finish"
-	ActionHomeStop       = "life.home.stop"
+	ActionHomeMove        = "life.home.move"
+	ActionHomeSleep       = "life.home.sleep"
+	ActionHomeWake        = "life.home.wake"
+	ActionHomeExercise    = "life.home.exercise"
+	ActionHomeMirrorPose  = "life.home.mirror_pose"
+	ActionHomeFashionShow = "life.home.fashion_show"
+	ActionHomeReading     = "life.home.reading"
+	ActionHomeFinish      = "life.home.finish"
+	ActionHomeStop        = "life.home.stop"
 
-	EventHomeMoveStarted               = "life.home.move.started"
-	EventHomeMoveArrived               = "life.home.move.arrived"
-	EventHomeSleepStarted              = "life.home.sleep.started"
-	EventHomeSleepWoke                 = "life.home.sleep.woke"
-	EventHomeExerciseStarted           = "life.home.exercise.started"
-	EventHomeExerciseCompleted         = "life.home.exercise.completed"
-	EventHomeMirrorPoseStarted         = "life.home.mirror_pose.started"
-	EventHomeMirrorPoseCompleted       = "life.home.mirror_pose.completed"
-	EventHomeActivityStopped           = "life.home.activity.stopped"
-	HomeActivityStatusRunning          = "running"
-	HomeActivityStatusCompleted        = "completed"
-	HomeActivityStatusWoke             = "woke"
-	HomeActivityStatusStopped          = "stopped"
-	maxHomeLayoutBytes                 = 1 << 20
-	maxHomeRooms                       = 256
-	maxHomePaths                       = 1024
-	maxHomeSlots                       = 512
-	maxHomeWaypoints                   = 256
-	maxHomeDurationMS            int64 = 7 * 24 * 60 * 60 * 1000
+	EventHomeMoveStarted                = "life.home.move.started"
+	EventHomeMoveArrived                = "life.home.move.arrived"
+	EventHomeSleepStarted               = "life.home.sleep.started"
+	EventHomeSleepWoke                  = "life.home.sleep.woke"
+	EventHomeExerciseStarted            = "life.home.exercise.started"
+	EventHomeExerciseCompleted          = "life.home.exercise.completed"
+	EventHomeMirrorPoseStarted          = "life.home.mirror_pose.started"
+	EventHomeMirrorPoseCompleted        = "life.home.mirror_pose.completed"
+	EventHomeFashionShowStarted         = "life.home.fashion_show.started"
+	EventHomeFashionShowCompleted       = "life.home.fashion_show.completed"
+	EventHomeReadingStarted             = "life.home.reading.started"
+	EventHomeReadingCompleted           = "life.home.reading.completed"
+	EventHomeActivityStopped            = "life.home.activity.stopped"
+	HomeActivityStatusRunning           = "running"
+	HomeActivityStatusCompleted         = "completed"
+	HomeActivityStatusWoke              = "woke"
+	HomeActivityStatusStopped           = "stopped"
+	maxHomeLayoutBytes                  = 1 << 20
+	maxHomeRooms                        = 256
+	maxHomePaths                        = 1024
+	maxHomeSlots                        = 512
+	maxHomeWaypoints                    = 256
+	maxHomeDurationMS             int64 = 7 * 24 * 60 * 60 * 1000
 )
 
 var (
@@ -269,7 +279,7 @@ func normalizeHomeLayout(layout HomeLayout) (HomeLayout, error) {
 			return HomeLayout{}, fmt.Errorf("%w: slot %q has an invalid Actor ID", ErrHomeLayout, slot.ID)
 		}
 		switch slot.Kind {
-		case HomeSlotBed, HomeSlotExercise, HomeSlotMirror, HomeSlotRest:
+		case HomeSlotBed, HomeSlotExercise, HomeSlotMirror, HomeSlotRest, HomeSlotFashionShow, HomeSlotReading:
 		default:
 			return HomeLayout{}, fmt.Errorf("%w: slot %q has an unknown kind", ErrHomeLayout, slot.ID)
 		}
@@ -298,9 +308,12 @@ func normalizeHomeLayout(layout HomeLayout) (HomeLayout, error) {
 			if slot.DurationMS != 0 {
 				return HomeLayout{}, fmt.Errorf("%w: bed slot %q cannot impose a sleep duration", ErrHomeLayout, slot.ID)
 			}
-		case HomeSlotExercise:
+		case HomeSlotExercise, HomeSlotFashionShow, HomeSlotReading:
+			if slot.Kind != HomeSlotExercise && slot.ActorID == "" {
+				return HomeLayout{}, fmt.Errorf("%w: %s slot %q requires an exact Actor owner", ErrHomeLayout, slot.Kind, slot.ID)
+			}
 			if slot.DurationMS <= 0 || slot.DurationMS > maxHomeDurationMS {
-				return HomeLayout{}, fmt.Errorf("%w: exercise slot %q requires a bounded duration", ErrHomeLayout, slot.ID)
+				return HomeLayout{}, fmt.Errorf("%w: %s slot %q requires a bounded duration", ErrHomeLayout, slot.Kind, slot.ID)
 			}
 		case HomeSlotMirror, HomeSlotRest:
 			if slot.DurationMS != 0 {
@@ -436,13 +449,15 @@ func (c *HomeController) Register(st *store.Store) {
 	st.Register(ActionHomeWake, c.handleWake)
 	st.Register(ActionHomeExercise, c.handleExercise)
 	st.Register(ActionHomeMirrorPose, c.handleMirrorPose)
+	st.Register(ActionHomeFashionShow, c.handleFashionShow)
+	st.Register(ActionHomeReading, c.handleReading)
 	st.Register(ActionHomeFinish, c.handleFinish)
 	st.Register(ActionHomeStop, c.handleStop)
 }
 
 func IsHomeAction(action string) bool {
 	switch action {
-	case ActionHomeMove, ActionHomeSleep, ActionHomeWake, ActionHomeExercise, ActionHomeMirrorPose, ActionHomeFinish, ActionHomeStop:
+	case ActionHomeMove, ActionHomeSleep, ActionHomeWake, ActionHomeExercise, ActionHomeMirrorPose, ActionHomeFashionShow, ActionHomeReading, ActionHomeFinish, ActionHomeStop:
 		return true
 	default:
 		return false
@@ -622,16 +637,31 @@ func (c *HomeController) handleWake(state store.State, raw json.RawMessage) (sto
 }
 
 func (c *HomeController) handleExercise(state store.State, raw json.RawMessage) (store.Outcome, error) {
+	return c.handleSlotActivity(state, raw, HomeSlotExercise, HomeActivityExercise, EventHomeExerciseStarted)
+}
+
+func (c *HomeController) handleFashionShow(state store.State, raw json.RawMessage) (store.Outcome, error) {
+	return c.handleSlotActivity(state, raw, HomeSlotFashionShow, HomeActivityFashionShow, EventHomeFashionShowStarted)
+}
+
+func (c *HomeController) handleReading(state store.State, raw json.RawMessage) (store.Outcome, error) {
+	return c.handleSlotActivity(state, raw, HomeSlotReading, HomeActivityReading, EventHomeReadingStarted)
+}
+
+func (c *HomeController) handleSlotActivity(state store.State, raw json.RawMessage, slotKind, activityKind, startedEvent string) (store.Outcome, error) {
 	var cmd homeActorCommand
 	if err := decodeHomePayload(raw, &cmd); err != nil || !validHomeID(cmd.ActorID) {
 		return store.Outcome{}, ErrHomePayload
 	}
-	slot, actor, err := c.actorAtSlot(state, cmd.ActorID, HomeSlotExercise)
+	slot, actor, err := c.actorAtSlot(state, cmd.ActorID, slotKind)
 	if err != nil {
 		return store.Outcome{}, err
 	}
+	if slotKind != HomeSlotExercise && (slot.ActorID != cmd.ActorID || actor.SlotID != slot.ID) {
+		return store.Outcome{}, ErrHomeWrongSlot
+	}
 	now := c.now().UTC()
-	return c.startActivity(state, cmd.ActorID, HomeActivityExercise, "", slot.ID, slot.DurationMS, now, EventHomeExerciseStarted, func(event *homeEvent) {
+	return c.startActivity(state, cmd.ActorID, activityKind, "", slot.ID, slot.DurationMS, now, startedEvent, func(event *homeEvent) {
 		event.RoomID = actor.RoomID
 		event.SlotID = slot.ID
 	}, nil, func(activityID string) []store.Reservation {
@@ -741,8 +771,8 @@ func (c *HomeController) handleFinish(state store.State, raw json.RawMessage) (s
 		event.SlotID = targetSlotID
 		kind = EventHomeMoveArrived
 		release = c.pathReservations(cmd.ActorID, cmd.ActivityID, actor.MoveResourceIDs)
-	case HomeActivityExercise:
-		kind = EventHomeExerciseCompleted
+	case HomeActivityExercise, HomeActivityFashionShow, HomeActivityReading:
+		kind = completedHomeEvent(activity.Kind)
 		release = []store.Reservation{{ResourceID: homeSlotResource(actor.SlotID), ActorID: cmd.ActorID, ActivityID: cmd.ActivityID, Quantity: 1}}
 	case HomeActivityMirrorPose:
 		kind = EventHomeMirrorPoseCompleted
@@ -774,7 +804,7 @@ func (c *HomeController) handleStop(state store.State, raw json.RawMessage) (sto
 	if activity.Kind == HomeActivitySleep {
 		return store.Outcome{}, ErrHomeNotInterruptible
 	}
-	if activity.Kind != HomeActivityMove && activity.Kind != HomeActivityExercise && activity.Kind != HomeActivityMirrorPose {
+	if activity.Kind != HomeActivityMove && !isHomeSlotActivity(activity.Kind) && activity.Kind != HomeActivityMirrorPose {
 		return store.Outcome{}, ErrHomeNotInterruptible
 	}
 	now := c.now().UTC()
@@ -801,7 +831,7 @@ func (c *HomeController) handleStop(state store.State, raw json.RawMessage) (sto
 	switch activity.Kind {
 	case HomeActivityMove:
 		release = c.pathReservations(cmd.ActorID, cmd.ActivityID, actor.MoveResourceIDs)
-	case HomeActivityExercise, HomeActivityMirrorPose:
+	case HomeActivityExercise, HomeActivityFashionShow, HomeActivityReading, HomeActivityMirrorPose:
 		release = []store.Reservation{{ResourceID: homeSlotResource(actor.SlotID), ActorID: cmd.ActorID, ActivityID: cmd.ActivityID, Quantity: 1}}
 	}
 	clearHomeActivity(&updated)
@@ -1156,6 +1186,28 @@ func clearHomeActivity(actor *store.ActorState) {
 	actor.MoveResourceIDs = ""
 	actor.LayoutSHA256 = ""
 	actor.HomeSceneSHA256 = ""
+}
+
+func isHomeSlotActivity(kind string) bool {
+	switch kind {
+	case HomeActivityExercise, HomeActivityFashionShow, HomeActivityReading:
+		return true
+	default:
+		return false
+	}
+}
+
+func completedHomeEvent(kind string) string {
+	switch kind {
+	case HomeActivityExercise:
+		return EventHomeExerciseCompleted
+	case HomeActivityFashionShow:
+		return EventHomeFashionShowCompleted
+	case HomeActivityReading:
+		return EventHomeReadingCompleted
+	default:
+		return ""
+	}
 }
 
 func homeActivityID(actorID string, sequence uint64) string {

@@ -551,6 +551,22 @@
       "approach_duration_ms": 3418
     },
     {
+      "id": "mio-fashion",
+      "kind": "fashion_show",
+      "actor_id": "mio",
+      "room_id": "upper-room-2-1",
+      "anchor": [-9.16, 3.72, 1.58],
+      "duration_ms": 60000
+    },
+    {
+      "id": "midori-reading",
+      "kind": "reading",
+      "actor_id": "midori",
+      "room_id": "upper-room-2-4",
+      "anchor": [9.35, 3.72, 1.96],
+      "duration_ms": 60000
+    },
+    {
       "id": "bed-aka",
       "kind": "bed",
       "actor_id": "aka",
@@ -714,6 +730,16 @@
       },
       {
         "id": "mirror-hands-on-hips",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 5100
+      },
+      {
+        "id": "mirror-crossed-arms",
+        "slot_id": "kuro-mirror",
+        "duration_ms": 5100
+      },
+      {
+        "id": "mirror-hand-near-face",
         "slot_id": "kuro-mirror",
         "duration_ms": 5100
       },
